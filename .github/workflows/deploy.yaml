@@ -218,6 +218,8 @@ jobs:
       run: |
         cd cd/${{ env.CD_PATH }}/${{ inputs.repo_path }}/overlays/${{ inputs.overlay_dir }}
         kustomize build . > ../../../build-output.yaml
+        sync
+        sleep 1
 
     - name: Upload built manifest as artifact
       uses: actions/upload-artifact@v4
