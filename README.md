@@ -105,7 +105,7 @@ This file maps logical environments (like `dev`, `prod`) to:
 
 | Action                                                                 | Version | Description                                                                 |
 |------------------------------------------------------------------------|---------|-----------------------------------------------------------------------------|
-| [actions/checkout](https://github.com/actions/checkout)               | `v3/v4` | Used to clone both source and CD repositories                              |
+| [actions/checkout](https://github.com/actions/checkout)               | `v4` | Used to clone both source and CD repositories                              |
 | [tibdex/github-app-token](https://github.com/tibdex/github-app-token) | `v1`    | Generates a GitHub App token to push to the CD repo                        |
 | [imranismail/setup-kustomize](https://github.com/imranismail/setup-kustomize) | `v2` | Installs the desired version of Kustomize                                  |
 | [actions/upload-artifact](https://github.com/actions/upload-artifact) | `v4`    | Stores rendered and built outputs for debugging                            |
