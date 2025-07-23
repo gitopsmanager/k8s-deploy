@@ -154,7 +154,7 @@ Two useful artifacts are uploaded after every run:
 ```yaml
 jobs:
   deploy:
-    uses: gitopsmanager/k8s-deploy/.github/workflows/deploy.yaml@main
+    uses: gitopsmanager/k8s-deploy/.github/workflows/deploy.yaml@v1
     with:
       environment: dev
       application: my-app
