@@ -203,13 +203,19 @@ The created ArgoCD Application will have:
 | `destination.namespace` | value from `inputs.namespace`                             |
 
 ---
+### 🔖 Versioning
 
-## 🏷 Versioning
+This workflow is published with Git tags for stable releases.
 
-Once stable, we recommend pinning to a versioned tag:
+- `@v1` – Tracks the latest stable version in the v1.x series (recommended)
+- Semantic tags like `@v1.0.0` will be published in the future for reproducible builds
+
+#### Example:
 ```yaml
 uses: gitopsmanager/k8s-deploy/.github/workflows/deploy.yaml@v1
 ```
+
+> ✅ Use `@v1` for stability and latest updates. Semantic version tags (e.g., `v1.0.0`) will be available as additional pinning options in future releases.
 
 ---
 
