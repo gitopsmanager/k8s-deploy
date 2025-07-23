@@ -1,167 +1,155 @@
-# Reusable GitHub Workflow: Kubernetes App Deployment with ArgoCD
+# 🚀 Reusable GitHub Workflow: Kubernetes App Deployment with ArgoCD
 
-> ⚠️ **Beta Notice**: This workflow is currently in beta. While the structure is stable, it has not yet been fully tested in production environments. Use with caution and feel free to contribute improvements via pull request.
+This GitHub Actions reusable workflow automates Kubernetes application deployment using [Kustomize](https://kubectl.docs.kubernetes.io/references/kustomize/) and [ArgoCD](https://argo-cd.readthedocs.io/en/stable/). It renders and templates your manifest files, commits the results to your continuous deployment repo, and uses the ArgoCD REST API to create and sync applications.
 
-This reusable GitHub Actions workflow deploys a Kubernetes application by rendering manifests using `kustomize` and syncing them to an ArgoCD-managed cluster.
-
----
-
-## 🔧 Inputs
-
-| Name                | Required | Type   | Description                                                                 |
-|---------------------|----------|--------|-----------------------------------------------------------------------------|
-| `environment`       | ✅        | string | Environment name (e.g. `dev`, `prod`)                                       |
-| `application`       | ✅        | string | Application name                                                            |
-| `namespace`         | ✅        | string | Kubernetes namespace to deploy into                                         |
-| `repo`              | ✅        | string | GitHub repo where source manifests live (e.g. `my-org/my-app`)             |
-| `repo_path`         | ✅        | string | Subdirectory in the repo containing manifests (e.g. `manifests/`)          |
-| `repo_commit_id`    | ❌        | string | Commit ID to checkout (takes precedence over branch if both set)           |
-| `branch_name`       | ❌        | string | Branch to checkout (default: `main`)                                       |
-| `overlay_dir`       | ✅        | string | Path to the kustomize overlay directory within the repo                    |
-| `image_tag`         | ❌        | string | Optional image tag to set on one or more container images                  |
-| `image_base_name`   | ❌        | string | Single image base name to patch (e.g. `my-app`)                            |
-| `image_base_names`  | ❌        | array  | Multiple image base names to patch                                         |
-| `kustomize_version` | ❌        | string | Kustomize version (default: `5.0.1`)                                       |
-| `skip_status_check` | ❌        | string | If `true`, skips waiting for ArgoCD sync to complete. Only confirms sync was accepted. |
-| `runner`            | ❌        | string | Runner label to execute the workflow on (e.g. `ubuntu-latest`, `self-hosted`) |
-
+> ✅ This workflow **always creates the ArgoCD Application** if it does not already exist — ensuring first-time deployments are fully automated.
 
 ---
 
-## 🔐 Secrets
+## ⚙️ Inputs
 
-These secrets must be defined in the calling repository:
-
-| Name                   | Description |
-|------------------------|-------------|
-| `ARGO_CD_ADMIN_USER`   | ArgoCD admin username |
-| `ARGO_CD_ADMIN_PASSWORD` | ArgoCD admin password |
+| Name                  | Required | Type    | Description                                                                 |
+|-----------------------|----------|---------|-----------------------------------------------------------------------------|
+| `runner`              | ❌       | string  | GitHub runner label (default: `ubuntu-latest`)                              |
+| `cd_repo`             | ✅       | string  | Continuous deployment repo that stores templated manifests                  |
+| `environment`         | ✅       | string  | Logical environment name (e.g. `dev`, `prod`)                               |
+| `application`         | ✅       | string  | Application name (used as part of ArgoCD app name)                          |
+| `namespace`           | ✅       | string  | Kubernetes namespace to deploy into                                         |
+| `repo`                | ✅       | string  | GitHub repo with source manifests (e.g. `my-org/my-app`)                   |
+| `repo_path`           | ✅       | string  | Path to manifest files (e.g. `manifests/`)                                  |
+| `repo_commit_id`      | ❌       | string  | Optional commit SHA to deploy (overrides `branch_name`)                     |
+| `branch_name`         | ❌       | string  | Git branch to checkout (default: `main`)                                    |
+| `overlay_dir`         | ✅       | string  | Subdirectory under `overlays/` to use with Kustomize                        |
+| `image_tag`           | ❌       | string  | Image tag to apply to container image(s)                                    |
+| `image_base_name`     | ❌       | string  | Single image base name to patch (e.g. `ghcr.io/org/app`)                    |
+| `image_base_names`    | ❌       | string  | Comma-separated list of image base names                                    |
+| `kustomize_version`   | ❌       | string  | Kustomize version to install (default: `5.0.1`)                              |
+| `skip_status_check`   | ❌       | string  | If `'true'`, skips waiting for ArgoCD sync to finish                        |
+| `insecure_argo`       | ❌       | boolean | If `true`, disables TLS verification for ArgoCD endpoints                   |
+| `debug`               | ❌       | boolean | If `true`, prints debug output of generated files and paths                 |
 
 ---
 
-## 🔧 Actions Used
+## 🔐 Required Secrets
 
-The `gitopsmanager` reusable workflow uses the following GitHub Actions:
+| Name                                 | Description                                         |
+|--------------------------------------|-----------------------------------------------------|
+| `ARGO_CD_ADMIN_USER`                 | ArgoCD admin username                               |
+| `ARGO_CD_ADMIN_PASSWORD`             | ArgoCD admin password                               |
+| `CONTINUOUS_DEPLOYMENT_GH_APP_ID`   | GitHub App ID used to access the CD repo            |
+| `CONTINUOUS_DEPLOYMENT_GH_APP_PRIVATE_KEY` | GitHub App private key                      |
+
+### 🧩 Optional Secrets
+
+| Name               | Description                                                                 |
+|--------------------|-----------------------------------------------------------------------------|
+| `ARGOCD_CA_CERT`   | PEM-formatted CA certificate to verify ArgoCD's TLS endpoint (if not using `insecure_argo`) |
+
+> ⚠️ **TLS Verification**:  
+> You must either set `insecure_argo: true` to skip TLS validation **OR** provide a valid `ARGOCD_CA_CERT` secret. If neither is set and ArgoCD is secured with a custom/self-signed certificate, the workflow will fail to connect.
+
+---
+
+## 📁 Repository Layout Expectations
+
+### Source Repository (`repo`)
+
+This should contain a standard [Kustomize base/overlay structure](https://kubectl.docs.kubernetes.io/references/kustomize/kustomization/) like:
+
+```
+manifests/
+  base/
+  overlays/
+    dev/
+    prod/
+```
+
+### Continuous Deployment Repository (`cd_repo`)
+
+The templated output from the deployment will be committed to:
+```
+${{ cd_repo }}/${cluster}/${namespace}/${application}/
+```
+
+This becomes the **ArgoCD source path**, from which the app syncs after every deployment.
+
+---
+
+## 🌍 Environment Mapping
+
+Your CD repo must define:
+
+```
+${{ cd_repo }}/config/env-map.yaml
+```
+
+With contents like:
+```yaml
+dev:
+  cluster: aks-west-europe
+  dns_zone: internal.demo.affinity7software.com
+prod:
+  cluster: aks-prod-eu
+  dns_zone: prod.example.com
+```
+
+This file maps logical environments (like `dev`, `prod`) to:
+- `cluster`: used in naming the ArgoCD app and web UI
+- `dns_zone`: used to compute the full ArgoCD web endpoint
+
+> 💡 This is used to support different clusters and hosted DNS zones (Azure DNS or Route53) per environment.
+
+---
+
+## 🛠 Actions Used
 
 | Action                                                                 | Version | Description                                                                 |
 |------------------------------------------------------------------------|---------|-----------------------------------------------------------------------------|
-| ![Checkout](https://img.shields.io/badge/actions--checkout-v4-blue?logo=github) [actions/checkout](https://github.com/actions/checkout) | `v4` | Checks out the repository so workflow jobs can access its contents. |
-| ![Kustomize](https://img.shields.io/badge/setup--kustomize-v2-blue?logo=kubernetes) [imranismail/setup-kustomize](https://github.com/imranismail/setup-kustomize) | `v2` | Sets up Kustomize CLI for building Kubernetes manifests. |
-| ![Artifact](https://img.shields.io/badge/upload--artifact-v4-blue?logo=github) [actions/upload-artifact](https://github.com/actions/upload-artifact) | `v4` | Uploads generated workflow
+| [actions/checkout](https://github.com/actions/checkout)               | `v3/v4` | Used to clone both source and CD repositories                              |
+| [tibdex/github-app-token](https://github.com/tibdex/github-app-token) | `v1`    | Generates a GitHub App token to push to the CD repo                        |
+| [imranismail/setup-kustomize](https://github.com/imranismail/setup-kustomize) | `v2` | Installs the desired version of Kustomize                                  |
+| [actions/upload-artifact](https://github.com/actions/upload-artifact) | `v4`    | Stores rendered and built outputs for debugging                            |
 
 ---
 
-## 🧱 Assumptions
+## 🔄 Deployment Flow Summary
 
-1. Your **GitHub runners** (e.g., via GitHub ARC) have:
-   - Read access to all source repos
-   - Write access to the `continuous-deployment` repo
-   - Authentication is handled via a GitHub App in the runner pod
-
-2. Your `kustomization.yaml` must include image replacement like:
-```yaml
-images:
-- name: my-app
-  newName: ghcr.io/my-org/my-app
-  newTag: "999"
-```
-
-3. The `continuous-deployment` repo contains a directory called `config/` with a file named `env-map.yaml`:
-```yaml
-config/env-map.yaml:
-  dev:
-    cluster: weu-eks03
-    dns_zone: prod.aws.demo.internal
-```
-This file defines environment-specific values used in the workflow:
-- `cluster`: used to construct the Argo CD ingress hostname
-- `dns_zone`: used as the DNS suffix to fully resolve the Argo CD hostname
-
-The workflow uses this data to template Ingress resources and build the ArgoCD endpoint URL:
-```text
-https://<cluster>-argocd-argocd-web-ui.<dns_zone>
-```
-So in the example above, the Argo CD instance will be located at:
-```
-https://weu-eks03-argocd-argocd-web-ui.prod.aws.demo.internal
-```
-
-> 💡 **Assumption**: Your Argo CD installation uses this naming convention for its ingress hostname. If your setup differs, you should update the URL construction logic in the workflow accordingly.
+1. **Clone the source repo and CD repo**
+2. **Read cluster and DNS zone info** from `${{ cd_repo }}/config/env-map.yaml`
+3. **Template all `${}` variables** using `envsubst` (only if present in supported file types)
+4. **Copy** templated manifests to:
+   ```
+   ${{ cd_repo }}/${cluster}/${namespace}/${application}/
+   ```
+5. **Patch image tags** in the `overlay_dir` if `image_tag` is provided
+6. **Run `kustomize build .`** on the overlay
+   - The result is saved as `build-output.yaml` (uploaded as an artifact)
+   - If build fails, the action will stop before contacting ArgoCD
+7. **Commit and push** the rendered code to the CD repo
+8. **ArgoCD app is created if it does not exist**, using the rendered template:
+   ```
+   gitopsmanager/k8s-deploy/templates/argocd-application-template.json
+   ```
+   The file is rendered using `envsubst` with variables from the environment.
+9. **ArgoCD sync is triggered via REST API**
+10. **Sync status is polled**, unless `skip_status_check: true`
 
 ---
 
-## 📁 CD Repo Structure
+## 📦 Artifact Uploads
 
-Manifests will be rendered and saved to:
-```text
-continuous-deployment/<cluster>/<namespace>/<application>/
-```
-This structure allows ArgoCD to track each environment and app cleanly.
+Two useful artifacts are uploaded after every run:
 
-The `overlay_dir` within this path will be used for `kustomize build`.
+| Artifact Name               | Description                                                 |
+|-----------------------------|-------------------------------------------------------------|
+| `templated-source-manifests` | All files after `envsubst` templating                      |
+| `built-kustomize-manifest`   | Final rendered output of `kustomize build`                 |
 
----
-
-```markdown
-## 🧩 Manifest Templating
-
-Before running `kustomize build`, the workflow uses `envsubst` to template all manifest files in your specified `repo_path`. This is especially useful for dynamically generating Ingress or other environment-aware resources with values such as:
-- `APPLICATION`
-- `CLUSTER_NAME`
-- `NAMESPACE`
-- `DNS_ZONE`
-
-For example, in an Ingress manifest, you could use:
-
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: ${APPLICATION}
-  namespace: ${NAMESPACE}
-spec:
-  rules:
-```
-To improve performance and avoid unnecessary substitutions, the workflow only templates files that:
-
-- Have one of the extensions: `.yaml`, `.yml`, or `.json`
-- Contain the pattern `${` (indicating they use environment variable placeholders)
-
-
-
-These values are injected by the workflow using envsubst, based on your workflow inputs and values resolved from `env-map.yaml`.
-
-> This approach allows you to reuse the same Kubernetes manifests across multiple environments, dynamically substituting names, hostnames, and namespaces to reflect the target cluster configuration.
+> These allow you to troubleshoot errors with ArgoCD sync or validate the rendered output locally.
 
 ---
 
-## 📦 Artifacts
-
-If the build fails (or for auditing), you will get:
-- `built-kustomize-manifest`: final YAML from `kustomize build`
-- `templated-source-manifests`: templated input files after `envsubst`
-
-These artifacts are downloadable in the Actions UI.
-
----
-
-## 🚀 ArgoCD Sync Behavior
-
-- The workflow constructs the ArgoCD web UI domain as:
-  ```
-  https://<cluster>-argocd-argocd-web-ui.<dns_zone>
-  ```
-
-- It then calls the REST API to trigger a sync of the app:
-  ```
-  POST /api/v1/applications/<application>-<cluster>-<namespace>/sync
-  ```
-
-- It polls `.status.sync.status` for up to 2 minutes until the app is marked `Synced`
-
----
-
-## 🧪 Example Call
+## 🧪 Example Workflow Call
 
 ```yaml
 jobs:
@@ -173,24 +161,61 @@ jobs:
       namespace: my-namespace
       repo: my-org/my-app
       repo_path: manifests
-      overlay_dir: overlays/dev
+      overlay_dir: dev
     secrets:
       ARGO_CD_ADMIN_USER: ${{ secrets.ARGO_CD_ADMIN_USER }}
       ARGO_CD_ADMIN_PASSWORD: ${{ secrets.ARGO_CD_ADMIN_PASSWORD }}
+      CONTINUOUS_DEPLOYMENT_GH_APP_ID: ${{ secrets.CD_GH_APP_ID }}
+      CONTINUOUS_DEPLOYMENT_GH_APP_PRIVATE_KEY: ${{ secrets.CD_GH_APP_KEY }}
+      ARGOCD_CA_CERT: ${{ secrets.ARGOCD_CA_CERT }}
+```
+
+---
+
+## 🏗 ArgoCD Requirements
+
+You **must** install ArgoCD with the following ingress hostname format:
+
+```
+https://${cluster}-argocd-argocd-web-ui.${dns_zone}
+```
+
+For example:
+```
+https://aks-west-europe-argocd-argocd-web-ui.internal.demo.affinity7software.com
+```
+
+> 🧠 This is how the workflow constructs the URL to talk to the ArgoCD API. If your ingress differs, you'll need to update the URL logic in `deploy.yaml`.
+
+---
+
+## 📦 ArgoCD App Details
+
+The created ArgoCD Application will have:
+
+| Field        | Value                                                                 |
+|--------------|-----------------------------------------------------------------------|
+| `project`    | `default`                                                             |
+| `name`       | `${namespace}-${application}`                                         |
+| `source.repoURL` | `https://github.com/${cd_repo}`                                   |
+| `source.path` | `${cluster}/${namespace}/${application}/overlays/${overlay_dir}`     |
+| `destination.server` | `https://kubernetes.default.svc`                             |
+| `destination.namespace` | value from `inputs.namespace`                             |
 
 ---
 
 ## 🏷 Versioning
 
-We recommend pinning to a version tag once stable. Example:
+Once stable, we recommend pinning to a versioned tag:
 ```yaml
 uses: gitopsmanager/k8s-deploy/.github/workflows/deploy.yaml@v1
 ```
-Tags will be published using semantic versioning (`v1`, `v1.0.0`, etc.).
 
 ---
 
-## 📝 License
+## 📄 License
 
-© 2025 Affinity7 Consulting Ltd. This project is licensed under the [MIT License](LICENSE). You are free to use, modify, and distribute it with attribution.
+© 2025 Affinity7 Consulting Ltd  
+Licensed under the [MIT License](LICENSE) — free to use, modify, and distribute with attribution.
+
 
