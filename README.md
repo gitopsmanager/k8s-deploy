@@ -219,9 +219,12 @@ uses: gitopsmanager/k8s-deploy/.github/workflows/deploy.yaml@v1
 
 ---
 
-## 📄 License
+## License
 
-© 2025 Affinity7 Consulting Ltd  
-Licensed under the [MIT License](LICENSE) — free to use, modify, and distribute with attribution.
+This project is licensed under the MIT License. See [LICENSE](./LICENSE) for details.
+
+Third-party components used in GitHub Actions workflows and automation are documented in:
+- [THIRD-PARTY-ACTIONS-AND-TOOLS.md](./THIRD-PARTY-ACTIONS-AND-TOOLS.md)
+
 
 
