@@ -10,6 +10,20 @@ on:
         required: false
         type: string
         default: ubuntu-latest
+      targets:
+        description: >
+          JSON array of compact deployment targets.
+          Each item must start with the environment name (e.g., `dev`, `uat`, `prod`)
+          and may include a cluster suffix if that environment has multiple clusters.
+          
+          Examples:
+          - "dev" → deploys to the single `dev` cluster
+          - "qa" → deploys to the single `qa` cluster
+          - "prod" → deploys to the single `prod` cluster
+          - "prodweu" → deploys to the `prod` environment, cluster matching "weu"
+        required: true
+        default: >
+          ["dev","qa",]
       cd_repo:
         required: true
         type: string
