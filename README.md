@@ -68,6 +68,63 @@ Example shape:
 }
 ```
 
+---
+
+## 🔑 UAMI Mapping for Azure Workload Identity
+
+When deploying to **Azure AKS**, this workflow supports exporting **User Assigned Managed Identity (UAMI)** client IDs as environment variables for templating.
+
+### How it works
+- Each `uami_map` entry from `env_map` is processed.
+- The `uami_name` is transformed into a safe environment variable name:
+  1. If it starts with `<cluster_name>-`, that prefix is **removed**.  
+     - Example: `devcluster-myidentity` → `myidentity`
+  2. All `-` characters are replaced with `_`.  
+     - Example: `sidecar-uami` → `sidecar_uami`
+  3. If the resulting name doesn’t start with `[A-Za-z_]`, an `_` is prepended.
+
+- The transformed name is exported into the workflow environment and set to the UAMI’s `client_id`.
+
+### Example
+Given this `env_map` cluster entry:
+
+```json
+{
+  "cluster": "devcluster",
+  "dns_zone": "internal.demo.affinity7software.com",
+  "container_registry": "ghcr.io/my-org",
+  "uami_map": [
+    {"uami_name": "devcluster-app-uami", "uami_resource_group": "rg-demo", "client_id": "1111-aaaa"},
+    {"uami_name": "sidecar-uami", "uami_resource_group": "rg-demo", "client_id": "2222-bbbb"}
+  ]
+}
+```
+
+The following environment variables will be exported for templating:
+
+```
+app_uami=1111-aaaa
+sidecar_uami=2222-bbbb
+```
+
+### Usage in Manifests
+You can now reference these UAMIs in your Kubernetes manifests with `envsubst`:
+
+```yaml
+env:
+  - name: APP_UAMI_CLIENT_ID
+    value: ${app_uami}
+  - name: SIDECAR_UAMI_CLIENT_ID
+    value: ${sidecar_uami}
+```
+
+### Notes
+- All exported variables are printed in the workflow logs for debugging.  
+- Duplicate names (after transformation) are skipped with a warning.  
+- This ensures UAMI variables are **safe for shell substitution** and consistent across clusters.
+
+
+
 ### ArgoCD / Misc
 | Name               | Required | Type   | Default | Description |
 |--------------------|----------|--------|---------|-------------|
