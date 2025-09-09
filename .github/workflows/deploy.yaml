@@ -10,31 +10,35 @@ on:
         required: false
         type: string
         default: ubuntu-latest
-      targets:
+      target:
         description: >
-          JSON array of compact deployment targets.
-          Each item must start with the environment name (e.g., `dev`, `uat`, `prod`)
-          and may include a cluster suffix if that environment has multiple clusters.
-          
-          Examples:
-          - "dev" → deploys to the single `dev` cluster
-          - "qa" → deploys to the single `qa` cluster
-          - "prod" → deploys to the single `prod` cluster
-          - "prodweu" → deploys to the `prod` environment, cluster matching "weu"
+          The environment to deploy to (e.g., `dev`, `qa`, `prod`).
+
+          - If the environment maps to a **single cluster** in `env_map`, this is all you need.
+          - If the environment maps to **multiple clusters**, you must also set `target_cluster`.
         required: true
-        default: >
-          ["dev","qa",]
+        default: "dev"
+
+      # REQUIRED when env has >1 clusters
+      target_cluster:
+        description: >
+          The specific cluster to deploy to when the selected `target` environment
+          has more than one cluster in `env_map`.
+
+          - For single-cluster environments (like `dev`, `qa`), leave this empty.
+          - For multi-cluster environments (like `prod` with both `aks-prod-weu` and `aks-prod-use`),
+            you must provide one of the valid cluster names from `env_map`.
+
+          Example: `aks-prod-weu`
+        required: false
+        default: ""
+
       cd_repo:
         required: true
         type: string
-      environment:
+      github_environment:
         required: true
         type: string
-      # REQUIRED when env has >1 clusters
-      cluster:
-        required: false
-        type: string
-
       # Mode A (single app)
       application:
         required: false
@@ -131,6 +135,7 @@ on:
 jobs:
   deploy:
     runs-on: ${{ inputs.runner }}
+    environment: ${{ github_environment }}
     outputs:
       cd_path: ${{ steps.cdroot.outputs.cd_root }}
     steps:
@@ -193,8 +198,8 @@ jobs:
       env:
         INLINE_ENV_MAP: ${{ inputs.env_map }}   # workflow input (preferred)
         ENV_MAP: ${{ env.ENV_MAP }}             # fallback env var (e.g., injected from ConfigMap on self-hosted)
-        ENVIRONMENT: ${{ inputs.environment }}
-        CLUSTER_IN: ${{ inputs.cluster }}
+        ENVIRONMENT: ${{ inputs.target }}
+        CLUSTER_IN: ${{ inputs.target_cluster }}
         NAMESPACE: ${{ inputs.namespace }}
       with:
         script: |
