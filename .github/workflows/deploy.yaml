@@ -258,14 +258,16 @@ jobs:
         echo "CD_ROOT=$CD_ROOT" >> "$GITHUB_ENV"
         echo "cd_root=$CD_ROOT" >> "$GITHUB_OUTPUT"
 
-    # Export UAMI env vars (uami_name => client_id) for selected cluster
+    # Export UAMI env vars (uami_name => client_id)
     - name: Export UAMI env vars (uami_name => client_id)
       uses: actions/github-script@v7
       env:
         UAMI_JSON: ${{ steps.env.outputs.uami_map }}
+        CLUSTER: ${{ steps.env.outputs.cluster }}
       with:
         script: |
           const fs = require('fs');
+          const clusterName = (process.env.CLUSTER || '').trim();
 
           let arr = [];
           try { arr = JSON.parse(process.env.UAMI_JSON || '[]'); }
@@ -276,20 +278,11 @@ jobs:
             return;
           }
 
-          const seenByName = new Set();
-          const seenByVar  = new Set();
-          const exported   = [];
-
-          const toShellId = (s) => {
-            const orig = String(s).trim();
-            let k = orig.replace(/[^A-Za-z0-9_]/g, '_');
-            if (!/^[A-Za-z_]/.test(k)) k = `_${k}`;
-            if (k !== orig) core.warning(`UAMI name '${orig}' adjusted to '${k}' for shell compatibility.`);
-            return k;
-          };
+          const seen = new Set();
+          const exported = [];
 
           for (const [i, u] of arr.entries()) {
-            const name = String(u.uami_name || '').trim();
+            let name = String(u.uami_name || '').trim();
             const rg   = String(u.uami_resource_group || '').trim();
             const cid  = String(u.client_id || '').trim();
 
@@ -298,24 +291,39 @@ jobs:
               continue;
             }
 
-            if (seenByName.has(name)) {
-              core.warning(`Duplicate UAMI name '${name}' (rg='${rg}'). Keeping the first occurrence.`);
-              continue;
+            // Remove "<clusterName>-" prefix if present
+            const prefix = clusterName + "-";
+            if (name.toLowerCase().startsWith(prefix.toLowerCase())) {
+              name = name.substring(prefix.length);
             }
 
-            const varName = toShellId(name);
-            if (seenByVar.has(varName)) {
-              core.warning(`UAMI name '${name}' maps to '${varName}', which collides with another UAMI. Keeping the first occurrence.`);
+            // Replace '-' with '_'
+            let varName = name.replace(/-/g, "_");
+
+            // Ensure valid shell identifier
+            if (!/^[A-Za-z_]/.test(varName)) varName = `_${varName}`;
+
+            if (seen.has(varName)) {
+              core.warning(`Duplicate UAMI var '${varName}' (rg='${rg}'). Skipping duplicate.`);
               continue;
             }
 
             fs.appendFileSync(process.env.GITHUB_ENV, `${varName}=${cid}\n`);
-            seenByName.add(name);
-            seenByVar.add(varName);
-            exported.push(varName);
+            seen.add(varName);
+            exported.push({ varName, cid });
           }
 
-          core.info(`Exported ${exported.length} UAMI env var(s): ${exported.join(', ')}`);
+          if (exported.length === 0) {
+            core.info("No UAMI vars exported.");
+          } else {
+            core.info("Exported UAMI vars for templating:");
+            for (const e of exported) {
+              core.info(`  ${e.varName}=${e.cid}`);
+            }
+          }
+
+
+
 
     # Unify to a single apps[] list for either mode
     - name: Resolve apps (single or multi)
