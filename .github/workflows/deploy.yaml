@@ -29,7 +29,7 @@ on:
           - For multi-cluster environments (like `prod` with both `aks-prod-weu` and `aks-prod-use`),
             you must provide one of the valid cluster names from `env_map`.
 
-          Example: `aks-prod-weu`
+          Example: `aks-prod-weu`   
         required: false
         default: ""
 
