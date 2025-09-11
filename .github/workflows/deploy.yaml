@@ -70,7 +70,7 @@ on:
         default: ""
 
       # Mode B (multi app)
-      applicationDetails:
+      application_details:
         description: >-
           JSON array where each item maps:
           { "name" => application, "images" => image_base_names[], "path" => deploy_path }
@@ -363,7 +363,7 @@ jobs:
       id: apps
       uses: actions/github-script@v7
       env:
-        APP_DETAILS: ${{ inputs.applicationDetails }}
+        APP_DETAILS: ${{ inputs.application_details }}
         APPLICATION: ${{ inputs.application }}
         DEPLOY_PATH: ${{ inputs.deploy_path }}
         IMG_ONE: ${{ inputs.image_base_name }}
@@ -375,15 +375,15 @@ jobs:
           if (detailsRaw) {
             let arr;
             try { arr = JSON.parse(detailsRaw); }
-            catch(e){ core.setFailed(`❌ applicationDetails is not valid JSON: ${e.message}`); return; }
-            if (!Array.isArray(arr)) { core.setFailed('❌ applicationDetails must be a JSON array'); return; }
+            catch(e){ core.setFailed(`❌ application_details is not valid JSON: ${e.message}`); return; }
+            if (!Array.isArray(arr)) { core.setFailed('❌ application_details must be a JSON array'); return; }
             for (let i=0;i<arr.length;i++){
               const it = arr[i] || {};
               const name = String(it.name || '').trim();
               const path = String(it.path || '').trim();
               const images = Array.isArray(it.images) ? it.images.map(String) : [];
-              if (!name) { core.setFailed(`❌ applicationDetails[${i}].name is required`); return; }
-              if (!path) { core.setFailed(`❌ applicationDetails[${i}].path is required`); return; }
+              if (!name) { core.setFailed(`❌ application_details[${i}].name is required`); return; }
+              if (!path) { core.setFailed(`❌ application_details[${i}].path is required`); return; }
               apps.push({ name, path, images });
             }
           } else {
@@ -395,8 +395,8 @@ jobs:
             if ((process.env.IMG_LIST || '').trim()) {
               for (const s of process.env.IMG_LIST.split(',').map(x => x.trim()).filter(Boolean)) images.push(s);
             }
-            if (!name) { core.setFailed('❌ application is required when applicationDetails is not provided'); return; }
-            if (!path) { core.setFailed('❌ deploy_path is required when applicationDetails is not provided'); return; }
+            if (!name) { core.setFailed('❌ application is required when application_details is not provided'); return; }
+            if (!path) { core.setFailed('❌ deploy_path is required when application_details is not provided'); return; }
             apps.push({ name, path, images });
           }
           core.setOutput('apps', JSON.stringify(apps));
