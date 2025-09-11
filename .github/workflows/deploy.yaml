@@ -35,6 +35,7 @@ on:
         description: "The github ref to use for checking out files"
         required: false
         type: string
+        default: ${{ github.ref || github.sha }}
       delete_first:
         description: "Delete the namespaced app first before deploying it."
         required: false
@@ -53,6 +54,7 @@ on:
         description: "The repo path to the deployment files"
         required: false
         type: string
+        default: Deployments
       image_tag:
         required: false
         type: string
@@ -224,7 +226,7 @@ jobs:
           try { map = JSON.parse(raw); }
           catch (err) { core.setFailed(`❌ env_map is not valid JSON: ${err.message}`); return; }
 
-          const envName  = process.env.ENVIRONMENT;
+          const envName   = process.env.ENVIRONMENT;
           const clusterIn = (process.env.CLUSTER_IN || '').trim();
 
           if (!Object.prototype.hasOwnProperty.call(map, envName)) {
@@ -232,50 +234,55 @@ jobs:
             return;
           }
 
-          const entry = map[envName];
-          if (!entry || typeof entry !== 'object' || !Array.isArray(entry.clusters)) {
-            core.setFailed(`❌ env_map['${envName}'] must be { cluster_count, clusters: [...] }`);
-            return;
-          }
-          if (entry.clusters.length === 0) {
-            core.setFailed(`❌ env_map['${envName}'].clusters is empty`);
-            return;
-          }
+          let selected;
+          if (clusterIn) {
+            // Search ALL clusters across all environments
+            const allClusters = Object.entries(map)
+              .flatMap(([env, val]) => (val.clusters || []).map(c => ({ ...c, __env: env })));
 
-          const names = [];
-          for (let i = 0; i < entry.clusters.length; i++) {
-            const c = entry.clusters[i] || {};
-            const name = String(c.cluster || '').trim();
-            const dns  = String(c.dns_zone || '').trim();
-            if (!name) { core.setFailed(`❌ clusters[${i}].cluster is required`); return; }
-            if (!dns)  { core.setFailed(`❌ clusters[${i}].dns_zone is required`); return; }
-            names.push(name);
-          }
-
-          if (entry.clusters.length > 1 && !clusterIn) {
-            core.setFailed(`❌ '${envName}' has multiple clusters. Provide 'cluster'. Options: ${names.join(', ')}`);
-            return;
-          }
-
-          let selected = entry.clusters[0];
-          if (entry.clusters.length > 1) {
-            selected = entry.clusters.find(c => String(c.cluster).toLowerCase() === clusterIn.toLowerCase());
+            selected = allClusters.find(c => String(c.cluster).toLowerCase() === clusterIn.toLowerCase());
             if (!selected) {
-              core.setFailed(`❌ Cluster '${clusterIn}' not found. Options: ${names.join(', ')}`);
+              const available = allClusters.map(c => `${c.cluster} (env=${c.__env})`);
+              core.setFailed(`❌ target_cluster '${clusterIn}' not found. Available: ${available.join(', ')}`);
               return;
             }
+            core.info(`Cluster override: using cluster '${selected.cluster}' from env '${selected.__env}'`);
+          } else {
+            // Fallback: normal target-based selection
+            const entry = map[envName];
+            if (!entry || typeof entry !== 'object' || !Array.isArray(entry.clusters)) {
+              core.setFailed(`❌ env_map['${envName}'] must be { cluster_count, clusters: [...] }`);
+              return;
+            }
+            if (entry.clusters.length === 0) {
+              core.setFailed(`❌ env_map['${envName}'].clusters is empty`);
+              return;
+            }
+
+            if (entry.clusters.length > 1) {
+              const names = entry.clusters.map(c => c.cluster).filter(Boolean);
+              core.setFailed(`❌ '${envName}' has multiple clusters. Provide target_cluster. Options: ${names.join(', ')}`);
+              return;
+            }
+
+            selected = entry.clusters[0];
+            core.info(`Selected single cluster '${selected.cluster}' from env '${envName}'`);
           }
 
-          const cluster = String(selected.cluster);
-          const dnsZone = String(selected.dns_zone);
-          const registry = String(selected.container_registry || '');
-          const uami = Array.isArray(selected.uami_map) ? selected.uami_map : [];
+          const cluster   = String(selected.cluster);
+          const dnsZone   = String(selected.dns_zone || '');
+          const registry  = String(selected.container_registry || '');
+          const uami      = Array.isArray(selected.uami_map) ? selected.uami_map : [];
+
+          if (!cluster) { core.setFailed('❌ Selected cluster name is empty'); return; }
+          if (!dnsZone) { core.setFailed(`❌ Cluster '${cluster}' is missing dns_zone`); return; }
 
           core.setOutput('cluster', cluster);
           core.setOutput('dns_zone', dnsZone);
           core.setOutput('container_registry', registry);
           core.setOutput('uami_map', JSON.stringify(uami));
           core.setOutput('namespace', process.env.NAMESPACE);
+
 
     - name: Export CD_ROOT
       id: cdroot
