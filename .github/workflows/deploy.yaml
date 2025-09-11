@@ -7,9 +7,8 @@ on:
   workflow_call:
     inputs:
       runner:
-        required: false
+        required: true
         type: string
-        default: ubuntu-latest
       target:
         description: >
           The environment to deploy to (e.g., `dev`, `qa`, `prod`).
@@ -32,7 +31,14 @@ on:
           Example: `aks-prod-weu`   
         required: false
         default: ""
-
+      ref:
+        description: "The github ref to use for checking out files"
+        required: false
+        type: string
+      delete_first:
+        description: "Delete the namespaced app first before deploying it."
+        required: false
+        type: boolean        
       cd_repo:
         required: true
         type: string
@@ -43,8 +49,8 @@ on:
       application:
         required: false
         type: string
-      deployFilesPath:
-        description: "The repo path to the deployment files (if not using an artifact)"
+      deploy_path:
+        description: "The repo path to the deployment files"
         required: false
         type: string
       image_tag:
@@ -65,7 +71,7 @@ on:
       applicationDetails:
         description: >-
           JSON array where each item maps:
-          { "name" => application, "images" => image_base_names[], "path" => deployFilesPath }
+          { "name" => application, "images" => image_base_names[], "path" => deploy_path }
           Example:
           [
             {"name":"app1","images":["repo/app1","repo/sidecar"],"path":"services/app1/overlays/prod"},
@@ -142,9 +148,10 @@ jobs:
     - name: Checkout repo
       uses: actions/checkout@v4
       with:
-        repository: ${{ inputs.repo }}
+        repository: ${{ github.repository }}
         path: source
-        ref: ${{ inputs.repo_commit_id != '' && inputs.repo_commit_id || inputs.branch_name }}
+        ref: ${{ inputs.ref }}
+        sparce-checkout: ${{ inputs.deploy_path }}
 
     - name: Ensure envsubst installed
       shell: bash
@@ -351,7 +358,7 @@ jobs:
       env:
         APP_DETAILS: ${{ inputs.applicationDetails }}
         APPLICATION: ${{ inputs.application }}
-        DEPLOY_PATH: ${{ inputs.deployFilesPath }}
+        DEPLOY_PATH: ${{ inputs.deploy_path }}
         IMG_ONE: ${{ inputs.image_base_name }}
         IMG_LIST: ${{ inputs.image_base_names }}
       with:
@@ -382,7 +389,7 @@ jobs:
               for (const s of process.env.IMG_LIST.split(',').map(x => x.trim()).filter(Boolean)) images.push(s);
             }
             if (!name) { core.setFailed('❌ application is required when applicationDetails is not provided'); return; }
-            if (!path) { core.setFailed('❌ deployFilesPath is required when applicationDetails is not provided'); return; }
+            if (!path) { core.setFailed('❌ deploy_path is required when applicationDetails is not provided'); return; }
             apps.push({ name, path, images });
           }
           core.setOutput('apps', JSON.stringify(apps));
@@ -586,6 +593,47 @@ jobs:
           core.setOutput('argocd_url', argocdUrl);
           core.setOutput('curl_ssl_flags', curlSslFlags);
           core.setOutput('token', finalToken);
+
+
+    - name: Delete ArgoCD apps first (per app)
+      if: ${{ inputs.delete_first }}
+      uses: actions/github-script@v7
+      env:
+        APPS: ${{ steps.apps.outputs.apps }}
+        ARGOCD_URL: ${{ steps.argocd_conn.outputs.argocd_url }}
+        ARGOCD_TOKEN: ${{ steps.argocd_conn.outputs.token }}
+        CURL_SSL_FLAGS: ${{ steps.argocd_conn.outputs.curl_ssl_flags }}
+        NAMESPACE: ${{ inputs.namespace }}
+      with:
+        script: |
+          const { execSync } = require('child_process');
+          const apps = JSON.parse(process.env.APPS || '[]');
+
+          for (const app of apps) {
+            const appName = `${process.env.NAMESPACE}-${app.name}`;
+            const deleteUrl = `${process.env.ARGOCD_URL}/api/v1/applications/${appName}`;
+
+            try {
+              const http = execSync(
+                `bash -lc 'curl ${process.env.CURL_SSL_FLAGS} -s -o /dev/null -w "%{http_code}" -X DELETE "${deleteUrl}" -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}"'`,
+                { encoding: 'utf8' }
+              ).trim();
+
+              if (http === '200') {
+                core.info(`🗑️ Deleted Argo app ${appName}`);
+              } else if (http === '404') {
+                core.info(`ℹ️ Argo app ${appName} not found, skipping delete.`);
+              } else {
+                core.warning(`⚠️ Unexpected response deleting ${appName}: HTTP ${http}`);
+              }
+            } catch (err) {
+              core.setFailed(`❌ Failed to run delete for ${appName}: ${err.message}`);
+              return;
+            }
+          }
+
+
+
 
     - name: Check or create ArgoCD applications (per app)
       uses: actions/github-script@v7
