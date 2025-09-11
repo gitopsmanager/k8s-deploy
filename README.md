@@ -36,7 +36,7 @@ It renders manifest files, commits the results into your **continuous deployment
   - `overlay_dir` (string, optional)
 
 - **Mode B: Multi App**
-  - `applicationDetails` (JSON array, optional)  
+  - `application_details` (JSON array, optional)  
     ```json
     [
       {"name":"app1","images":["repo/app1","repo/sidecar"],"path":"services/app1/overlays/prod"},
@@ -289,7 +289,7 @@ with:
   github_environment: qa
   target: qa
   namespace: qa-namespace
-  applicationDetails: |
+  application_details: |
     [
       {"name":"service1","images":["repo/service1"],"path":"services/service1/overlays/qa"},
       {"name":"service2","images":["repo/service2"],"path":"apps/service2/overlays/qa"}
