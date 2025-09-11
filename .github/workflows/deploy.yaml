@@ -6,7 +6,7 @@
 on:
   workflow_call:
     inputs:
-      runner:
+      github_runner:
         required: true
         type: string
       target:
@@ -142,7 +142,7 @@ on:
 
 jobs:
   deploy:
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.github_runner }}
     environment: ${{ github_environment }}
     outputs:
       cd_path: ${{ steps.cdroot.outputs.cd_root }}
