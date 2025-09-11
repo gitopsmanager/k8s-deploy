@@ -47,10 +47,41 @@ It renders manifest files, commits the results into your **continuous deployment
 ---
 
 ### Environment Map
-`env_map` must be valid JSON in this form:
+
+The workflow needs an `env_map` that defines your environments, clusters, and related metadata.  
+You can provide it in **two ways**:
+
+1. As a workflow input (`with: env_map: "<JSON>"`) ✅ **preferred**  
+2. As an environment variable (`env: ENV_MAP: "<JSON>"`) — fallback for self-hosted runners  
+
+If neither is provided, the workflow fails.
+
+---
+
+#### Cluster Resolution Logic
+
+1. If `target_cluster` is set:  
+   - The workflow searches **all clusters across all environments** in the `env_map`.  
+   - If it finds a matching cluster name, it selects that cluster (and its `dns_zone`, `container_registry`, `uami_map`) regardless of the `target` environment.  
+   - This makes it possible to directly target a cluster by name while still requiring `target` for approvals.  
+
+2. If `target_cluster` is not set:  
+   - The workflow looks inside the `target` environment only.  
+   - If that environment has a **single cluster**, it is selected automatically.  
+   - If the environment has **multiple clusters**, the workflow fails with a clear error message and lists valid options.  
+
+---
+
+#### Example env_map JSON
 
 ```json
 {
+  "dev": {
+    "cluster_count": 1,
+    "clusters": [
+      { "cluster": "aks-dev-weu", "dns_zone": "internal.dev.example.com", "container_registry": "ghcr.io/my-org", "uami_map": [] }
+    ]
+  },
   "prod": {
     "cluster_count": 2,
     "clusters": [
@@ -61,10 +92,97 @@ It renders manifest files, commits the results into your **continuous deployment
 }
 ```
 
-Precedence:
-1. `inputs.env_map` (preferred)  
-2. `ENV_MAP` environment variable (fallback)  
-3. None → workflow fails  
+---
+
+#### Example Usages
+
+**Targeting a cluster globally (preferred for multi-cluster envs):**
+```yaml
+with:
+  target: prod
+  target_cluster: aks-prod-weu
+  env_map: ${{ secrets.ENV_MAP_JSON }}
+```
+
+**Targeting a single-cluster environment (no `target_cluster` needed):**
+```yaml
+with:
+  target: dev
+  env_map: ${{ secrets.ENV_MAP_JSON }}
+```
+
+---
+
+## 🔑 UAMI Mapping for Azure Workload Identity
+
+When deploying to **Azure AKS**, some clusters may define **User Assigned Managed Identities (UAMIs)** in the `env_map`.  
+This workflow automatically exports those UAMI client IDs as environment variables so they can be used for manifest templating.
+
+---
+
+### How It Works
+For each `uami_map` entry in the selected cluster:
+
+1. **Take the `uami_name`**  
+   - If it starts with `<cluster>-` (the selected cluster name followed by a dash), that prefix is **removed**.  
+     - Example: `prodcluster-app-uami` → `app-uami`.
+
+2. **Normalize the name**  
+   - Replace `-` with `_`.  
+     - Example: `sidecar-uami` → `sidecar_uami`.  
+   - If the result doesn’t start with a letter or `_`, prepend `_`.  
+     - Example: `123-identity` → `_123_identity`.
+
+3. **Export as environment variable**  
+   - Variable name = normalized `uami_name`.  
+   - Value = `client_id` of the UAMI.  
+   - Written into `$GITHUB_ENV`, so it’s available to all subsequent steps.  
+
+4. **Deduplicate**  
+   - If two UAMIs normalize to the same name, duplicates are skipped with a warning.
+
+---
+
+### Example
+
+Given this `env_map` entry for a cluster:
+
+```json
+{
+  "cluster": "prodcluster",
+  "dns_zone": "internal.example.com",
+  "container_registry": "ghcr.io/my-org",
+  "uami_map": [
+    {"uami_name": "prodcluster-app-uami", "uami_resource_group": "rg-demo", "client_id": "1111-aaaa"},
+    {"uami_name": "sidecar-uami", "uami_resource_group": "rg-demo", "client_id": "2222-bbbb"}
+  ]
+}
+```
+
+Exports these environment variables:
+
+```
+app_uami=1111-aaaa
+sidecar_uami=2222-bbbb
+```
+
+---
+
+### Usage in Manifests
+
+You can reference these exported variables during `envsubst` templating.  
+For example:
+
+```yaml
+env:
+  - name: APP_UAMI_CLIENT_ID
+    value: ${app_uami}
+  - name: SIDECAR_UAMI_CLIENT_ID
+    value: ${sidecar_uami}
+```
+
+When the workflow runs, `${app_uami}` and `${sidecar_uami}` will be substituted with the correct client IDs.
+
 
 ---
 
