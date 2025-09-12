@@ -175,8 +175,9 @@ jobs:
       with:
         app-id: ${{ secrets.CONTINUOUS_DEPLOYMENT_GH_APP_ID }}
         private-key: ${{ secrets.CONTINUOUS_DEPLOYMENT_GH_APP_PRIVATE_KEY }}
-        owner: ${{ github.repository_owner }}
-        repositories: '["${{ inputs.cd_repo }}"]'
+        owner: ${{ inputs.cd_repo.split('/')[0] }}
+        repositories: '["${{ inputs.cd_repo.split('/')[1] }}"]'
+
 
 
     - name: Checkout reusable workflow repo
