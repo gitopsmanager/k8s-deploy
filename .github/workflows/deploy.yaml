@@ -48,6 +48,9 @@ on:
       cd_repo:
         required: true
         type: string
+      cd_repo_org:
+        required: true
+        type: string
       github_environment:
         required: true
         type: string
@@ -175,8 +178,8 @@ jobs:
       with:
         app-id: ${{ secrets.CONTINUOUS_DEPLOYMENT_GH_APP_ID }}
         private-key: ${{ secrets.CONTINUOUS_DEPLOYMENT_GH_APP_PRIVATE_KEY }}
-        owner: ${{ inputs.cd_repo.split('/')[0] }}
-        repositories: '["${{ inputs.cd_repo.split('/')[1] }}"]'
+        owner: ${{ inputs.cd_repo_org }}
+        repositories: ${{ inputs.cd_repo }}
 
 
 
