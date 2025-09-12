@@ -145,7 +145,7 @@ on:
 jobs:
   deploy:
     runs-on: ${{ inputs.github_runner }}
-    environment: ${{ github_environment }}
+    environment: ${{ inputs.github_environment }}
     outputs:
       cd_path: ${{ steps.cdroot.outputs.cd_root }}
     steps:
