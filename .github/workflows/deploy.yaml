@@ -9,6 +9,9 @@ on:
       github_runner:
         required: true
         type: string
+      namespace:
+        required: true
+        type: string
       target:
         description: >
           The environment to deploy to (e.g., `dev`, `qa`, `prod`).
