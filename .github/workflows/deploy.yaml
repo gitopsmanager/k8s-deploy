@@ -193,8 +193,6 @@ jobs:
       with:
         timeout-ms: 800
 
-    - name: Report cloud provider
-      run: echo "☁️ Cloud provider detected: '${{ steps.cloud.outputs.provider }}'"
 
     - name: Warn if GitHub-hosted (unknown cloud)
       if: ${{ steps.cloud.outputs.provider == 'unknown' }}
