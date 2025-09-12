@@ -192,7 +192,7 @@ jobs:
     - name: Checkout continuous-deployment repo
       uses: actions/checkout@v4
       with:
-        repository: ${{ inputs.cd_repo }}
+        repository: ${{ inputs.cd_repo_org }}/${{ inputs.cd_repo }}
         token: ${{ steps.generate_token.outputs.token }}
         path: cd
 
