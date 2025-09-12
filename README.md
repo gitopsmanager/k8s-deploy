@@ -216,7 +216,7 @@ When the workflow runs, `${app_uami}` and `${sidecar_uami}` will be substituted 
 | Action | Version | Purpose |
 |--------|---------|---------|
 | [`actions/checkout`](https://github.com/actions/checkout) | `v4` | Checkout source repo, reusable workflow repo, and CD repo |
-| [`tibdex/github-app-token`](https://github.com/tibdex/github-app-token) | `v1` | Generate GitHub App token for authenticated CD repo access |
+| [`tibdex/github-app-token`](https://github.com/tibdex/github-app-token) | `v2.1.0` | Generate GitHub App token for authenticated CD repo access |
 | [`gitopsmanager/detect-cloud`](https://github.com/gitopsmanager/detect-cloud) | `main` | Detect whether runner is AWS, Azure, or unknown |
 | [`actions/github-script`](https://github.com/actions/github-script) | `v7` | Inline scripting for JSON parsing, cluster selection, app management, templating, etc. |
 | [`imranismail/setup-kustomize`](https://github.com/imranismail/setup-kustomize) | `v2` | Install kustomize CLI for manifest builds |
