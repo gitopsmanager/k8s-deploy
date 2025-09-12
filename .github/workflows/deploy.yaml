@@ -17,6 +17,7 @@ on:
           - If the environment maps to **multiple clusters**, you must also set `target_cluster`.
         required: true
         default: "dev"
+        type: string
 
       # REQUIRED when env has >1 clusters
       target_cluster:
@@ -31,6 +32,7 @@ on:
           Example: `aks-prod-weu`   
         required: false
         default: ""
+        type: string
       ref:
         description: "The github ref to use for checking out files"
         required: false
