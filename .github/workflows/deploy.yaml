@@ -455,32 +455,29 @@ jobs:
           // github-script: anything you return is exposed as "steps.render.outputs.result"
           return dirs.join("\n");
 
-
-    - name: Upload templated manifests
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: templated-source-manifests
-        path: ${{ steps.render.outputs.result }}
-
     - name: Copy manifests to CD repo
+      id: copy
       env:
         CLUSTER_NAME: ${{ steps.env.outputs.cluster }}
         NAMESPACE: ${{ inputs.namespace }}
       run: |
+        mkdir -p continuous-deployment/$CLUSTER_NAME/$NAMESPACE/
         echo "${{ steps.render.outputs.result }}" | while read -r dir; do
           [ -z "$dir" ] && continue
-          mkdir -p continuous-deployment/$CLUSTER_NAME/$NAMESPACE/
           cp -r "$dir" continuous-deployment/$CLUSTER_NAME/$NAMESPACE/
         done
+        echo "cd_path=continuous-deployment/$CLUSTER_NAME/$NAMESPACE" >> $GITHUB_OUTPUT
 
-
-
-
+    - name: Upload CD repo manifests
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: templated-source-manifests
+        path: ${{ steps.copy.outputs.cd_path }}
 
     - name: Debug structure
       if: ${{ inputs.debug }}
-      run: find "cd/${{ env.CD_ROOT }}" || echo "Nothing copied!"
+      run: find "${{ steps.copy.outputs.cd_path }}" || echo "Nothing copied!"
 
     - name: Setup Kustomize
       uses: imranismail/setup-kustomize@v2
@@ -492,17 +489,21 @@ jobs:
       uses: actions/github-script@v7
       env:
         APPS: ${{ steps.apps.outputs.apps }}
-        CD_ROOT: ${{ env.CD_ROOT }}
-        OVERLAY_DIR: ${{ inputs.overlay_dir }}
+        CD_PATH: ${{ steps.copy.outputs.cd_path }}
         IMAGE_TAG: ${{ inputs.image_tag }}
+        OVERLAY_DIR: ${{ inputs.overlay_dir }}
       with:
         script: |
           const { execSync } = require('child_process');
           const apps = JSON.parse(process.env.APPS || '[]');
           const overlayDir = (process.env.OVERLAY_DIR || '').trim();
+
           for (const app of apps) {
-            const base = overlayDir ? `cd/${process.env.CD_ROOT}/${app.name}/${app.path}/overlays/${overlayDir}` : `cd/${process.env.CD_ROOT}/${app.name}/${app.path}`;
+            const base = overlayDir
+              ? `${process.env.CD_PATH}/${app.name}/${app.path}/overlays/${overlayDir}`
+              : `${process.env.CD_PATH}/${app.name}/${app.path}`;
             if ((app.images || []).length === 0) continue;
+
             for (const img of app.images) {
               execSync(`bash -lc 'cd "${base}" && kustomize edit set image "${img}=*:${process.env.IMAGE_TAG}"'`, { stdio: 'inherit' });
             }
@@ -513,7 +514,7 @@ jobs:
       uses: actions/github-script@v7
       env:
         APPS: ${{ steps.apps.outputs.apps }}
-        CD_ROOT: ${{ env.CD_ROOT }}
+        CD_PATH: ${{ steps.copy.outputs.cd_path }}
         OVERLAY_DIR: ${{ inputs.overlay_dir }}
       with:
         script: |
@@ -522,14 +523,20 @@ jobs:
           const apps = JSON.parse(process.env.APPS || '[]');
           const overlayDir = (process.env.OVERLAY_DIR || '').trim();
           const outFile = `${process.env.GITHUB_WORKSPACE}/build-output.yaml`;
+
           fs.writeFileSync(outFile, '');
           let first = true;
+
           for (const app of apps) {
-            const dir = overlayDir ? `cd/${process.env.CD_ROOT}/${app.name}/${app.path}/overlays/${overlayDir}` : `cd/${process.env.CD_ROOT}/${app.name}/${app.path}`;
+            const dir = overlayDir
+              ? `${process.env.CD_PATH}/${app.name}/${app.path}/overlays/${overlayDir}`
+              : `${process.env.CD_PATH}/${app.name}/${app.path}`;
             const yaml = execSync(`bash -lc 'cd "${dir}" && kustomize build .'`, { encoding: 'utf8' });
             fs.appendFileSync(outFile, (first ? '' : '\n---\n') + yaml);
             first = false;
           }
+
+          return outFile;
 
     - name: Upload built manifest as artifact
       if: always()
@@ -538,17 +545,18 @@ jobs:
         name: built-kustomize-manifest
         path: build-output.yaml
 
-
-
     - name: Commit and push to continuous-deployment repo
       run: |
         cd cd
         git config user.name "GitHub Actions"
         git config user.email "actions@github.com"
-        git add "${{ env.CD_ROOT }}/"
+        git add "${{ steps.copy.outputs.cd_path }}/"
         git diff --cached --quiet && exit 0
         git commit -m "Deploy to ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} (apps: ${{ steps.apps.outputs.count }})"
         git push
+
+
+
 
     - name: Resolve ArgoCD auth
       id: resolve_auth
@@ -653,7 +661,7 @@ jobs:
       uses: actions/github-script@v7
       env:
         APPS: ${{ steps.apps.outputs.apps }}
-        CD_ROOT: ${{ env.CD_ROOT }}
+        CD_PATH: ${{ steps.copy.outputs.cd_path }}
         OVERLAY_DIR: ${{ inputs.overlay_dir }}
         CD_REPO: ${{ inputs.cd_repo }}
         ARGOCD_URL: ${{ steps.argocd_conn.outputs.argocd_url }}
@@ -664,16 +672,17 @@ jobs:
           const fs = require('fs');
           const path = require('path');
           const nunjucks = require('./nunjucks.js');
-          
+
           const apps = JSON.parse(process.env.APPS || '[]');
-          
+
           for (const app of apps) {
             const appName = `${process.env.NAMESPACE}-${app.name}`;
             const statusUrl = `${process.env.ARGOCD_URL}/api/v1/applications/${appName}`;
 
-            const cdPath = (process.env.OVERLAY_DIR || '').trim()
-              ? `${process.env.CD_ROOT}/${app.name}/${app.path}/overlays/${process.env.OVERLAY_DIR}`
-              : `${process.env.CD_ROOT}/${app.name}/${app.path}`;
+            // use cd_path output instead of stitching CD_ROOT
+            const basePath = (process.env.OVERLAY_DIR || '').trim()
+              ? path.join(process.env.CD_PATH, app.name, app.path, 'overlays', process.env.OVERLAY_DIR)
+              : path.join(process.env.CD_PATH, app.name, app.path);
 
             // --- Check if app exists
             const res = await fetch(statusUrl, {
@@ -689,14 +698,14 @@ jobs:
               return;
             }
 
-            // --- Render JSON with Nunjucks
+            // --- Render JSON with Nunjucks template
             const templatePath = 'reusable/templates/argocd-application-template.json.j2';
             const template = fs.readFileSync(templatePath, 'utf8');
             const rendered = nunjucks.renderString(template, {
               APP_NAME: appName,
               NAMESPACE: process.env.NAMESPACE,
               CD_REPO: process.env.CD_REPO,
-              CD_PATH: cdPath
+              CD_PATH: basePath
             });
 
             // --- POST to ArgoCD
@@ -717,6 +726,7 @@ jobs:
 
             core.info(`✅ Created Argo app ${appName}.`);
           }
+
 
 
     - name: Sync ArgoCD apps (per app)
