@@ -494,11 +494,13 @@ jobs:
         CD_PATH: ${{ steps.copy.outputs.cd_path }}
         IMAGE_TAG: ${{ inputs.image_tag }}
         OVERLAY_DIR: ${{ inputs.overlay_dir }}
+        CONTAINER_REGISTRY: ${{ steps.env.outputs.container_registry }}
       with:
         script: |
           const { execSync } = require('child_process');
           const apps = JSON.parse(process.env.APPS || '[]');
           const overlayDir = (process.env.OVERLAY_DIR || '').trim();
+          const registry = process.env.CONTAINER_REGISTRY.replace(/\/+$/, ''); // strip trailing slash if any
 
           for (const app of apps) {
             // Normalized layout: just app.name (+ overlays if defined)
@@ -509,12 +511,15 @@ jobs:
             if ((app.images || []).length === 0) continue;
 
             for (const img of app.images) {
+              // full replacement: <registry>/<image>:<tag>
+              const newImage = `${registry}/${img}:${process.env.IMAGE_TAG}`;
               execSync(
-                `bash -lc 'cd "${base}" && kustomize edit set image "${img}=*:${process.env.IMAGE_TAG}"'`,
+                `bash -lc 'cd "${base}" && kustomize edit set image "${img}=${newImage}"'`,
                 { stdio: 'inherit' }
               );
             }
           }
+
 
 
     - name: Run kustomize build (concat per app)
