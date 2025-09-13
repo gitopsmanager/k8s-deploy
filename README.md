@@ -180,6 +180,21 @@ env:
 
 ---
 
+### Using Nunjucks in GitHub Actions without npm install
+
+Normally, you would install Nunjucks via `npm install nunjucks`, but `actions/github-script`
+does not have access to modules installed at runtime. To keep things lightweight and fast,
+you can **download the prebuilt UMD bundle** of Nunjucks directly before using it.
+
+```yaml
+- name: Download Nunjucks UMD bundle
+  run: |
+    curl -sSL https://cdnjs.cloudflare.com/ajax/libs/nunjucks/3.2.4/nunjucks.min.js -o nunjucks.js
+
+---
+
+
+
 ### ArgoCD / Misc
 | Name                | Required | Type    | Default  | Description |
 |---------------------|----------|---------|----------|-------------|
