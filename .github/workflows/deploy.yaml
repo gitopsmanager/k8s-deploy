@@ -456,6 +456,7 @@ jobs:
           return dirs.join("\n");
 
     - name: Copy manifests to CD repo
+      id: copy
       env:
         CLUSTER_NAME: ${{ steps.env.outputs.cluster }}
         NAMESPACE: ${{ inputs.namespace }}
