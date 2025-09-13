@@ -2,7 +2,7 @@
 
 This reusable workflow automates Kubernetes application deployment using [Kustomize](https://kubectl.docs.kubernetes.io/references/kustomize/) and [ArgoCD](https://argo-cd.readthedocs.io/en/stable/).  
 
-It renders manifest files, commits the results into your **continuous deployment (CD) repo**, and uses the **ArgoCD REST API** to create, sync, and validate applications.
+It renders manifest files using **Jinja2-style templating implemented with [Nunjucks](https://mozilla.github.io/nunjucks/)**, commits the results into your **continuous deployment (CD) repo**, and uses the **ArgoCD REST API** to create, sync, and validate applications.
 
 > ✅ **First-time deployments are supported** – ArgoCD apps are auto-created if missing.  
 > 🗑️ **Optional `delete_first`** – force ArgoCD app deletion before re-create.  
@@ -145,8 +145,6 @@ For each `uami_map` entry in the selected cluster:
 
 ### Example
 
-Given this `env_map` entry for a cluster:
-
 ```json
 {
   "cluster": "prodcluster",
@@ -159,7 +157,7 @@ Given this `env_map` entry for a cluster:
 }
 ```
 
-Exports these environment variables:
+Exports:
 
 ```
 app_uami=1111-aaaa
@@ -170,19 +168,15 @@ sidecar_uami=2222-bbbb
 
 ### Usage in Manifests
 
-You can reference these exported variables during `envsubst` templating.  
-For example:
+You can reference these exported variables during **Jinja2 templating with Nunjucks**:  
 
 ```yaml
 env:
   - name: APP_UAMI_CLIENT_ID
-    value: ${app_uami}
+    value: {{ app_uami }}
   - name: SIDECAR_UAMI_CLIENT_ID
-    value: ${sidecar_uami}
+    value: {{ sidecar_uami }}
 ```
-
-When the workflow runs, `${app_uami}` and `${sidecar_uami}` will be substituted with the correct client IDs.
-
 
 ---
 
@@ -195,7 +189,7 @@ When the workflow runs, `${app_uami}` and `${sidecar_uami}` will be substituted 
 | `kustomize_version` | ❌       | string  | `5.0.1`  | Version of kustomize to install |
 | `skip_status_check` | ❌       | string  | `false`  | Skip waiting for ArgoCD sync |
 | `insecure_argo`     | ❌       | boolean | `false`  | Disable TLS verification for ArgoCD API |
-| `convert_jinja`     | ❌       | boolean | `false`  | Convert `{{ var }}` → `${var}` placeholders before templating |
+| `convert_jinja`     | ❌       | boolean | `false`  | (Legacy) Convert `{{ var }}` → `${var}` placeholders before templating. No longer required if using Jinja2 templating directly. |
 | `debug`             | ❌       | boolean | `false`  | Print copied directory structure |
 
 ---
@@ -215,50 +209,43 @@ When the workflow runs, `${app_uami}` and `${sidecar_uami}` will be substituted 
 
 | Action | Version | Purpose |
 |--------|---------|---------|
-| [`actions/checkout`](https://github.com/actions/checkout) | `v4` | Checkout source repo, reusable workflow repo, and CD repo |
-| [`tibdex/github-app-token`](https://github.com/tibdex/github-app-token) | `v2.1.0` | Generate GitHub App token for authenticated CD repo access |
-| [`gitopsmanager/detect-cloud`](https://github.com/gitopsmanager/detect-cloud) | `main` | Detect whether runner is AWS, Azure, or unknown |
-| [`actions/github-script`](https://github.com/actions/github-script) | `v7` | Inline scripting for JSON parsing, cluster selection, app management, templating, etc. |
-| [`imranismail/setup-kustomize`](https://github.com/imranismail/setup-kustomize) | `v2` | Install kustomize CLI for manifest builds |
-| [`actions/upload-artifact`](https://github.com/actions/upload-artifact) | `v4` | Upload built manifests and templated source manifests as workflow artifacts |
+| [`actions/checkout`](https://github.com/actions/checkout) | `v4` | Checkout repos |
+| [`actions/create-github-app-token`](https://github.com/actions/create-github-app-token) | `v2` | Generate GitHub App token |
+| [`gitopsmanager/detect-cloud`](https://github.com/gitopsmanager/detect-cloud) | `main` | Detect cloud provider |
+| [`actions/github-script`](https://github.com/actions/github-script) | `v7` | JSON parsing, cluster selection, templating with Nunjucks |
+| [`imranismail/setup-kustomize`](https://github.com/imranismail/setup-kustomize) | `v2` | Install kustomize |
+| [`actions/upload-artifact`](https://github.com/actions/upload-artifact) | `v4` | Upload artifacts |
 
 ---
 
 ## 📦 Artifacts
 
-- **`templated-source-manifests`** – manifests after envsubst templating  
+- **`templated-source-manifests`** – manifests after **Jinja2 templating with Nunjucks**  
 - **`built-kustomize-manifest`** – final rendered YAML from `kustomize build`  
 
 ---
 
 ## 🔄 Deployment Flow
 
-1. Checkout source and CD repos  
+1. Checkout repos  
 2. Parse `env_map`  
-   - If `target_cluster` is set → select cluster globally across all envs.  
-   - Otherwise → select from `target` environment only.  
-3. Export Azure UAMI client IDs (if defined)  
-4. Optional: Jinja → envsubst conversion  
-5. Template manifests with `envsubst`  
-6. Copy to CD repo structure:
-   ```
-   continuous-deployment/<cluster>/<namespace>/<application>/
-   ```
-7. Patch image tags (if provided)  
-8. Build manifests with `kustomize`  
-9. Upload artifacts  
-10. Commit & push to CD repo  
-11. Authenticate with ArgoCD (token > user/pass > secrets)  
-12. (Optional) Delete apps if `delete_first` is true  
-13. Create missing ArgoCD apps  
-14. Trigger sync  
-15. Wait for sync (unless skipped)  
+3. Export UAMI client IDs  
+4. Template manifests with **Nunjucks (Jinja2 style)**  
+5. Copy to CD repo structure  
+6. Patch images  
+7. Build with kustomize  
+8. Upload artifacts  
+9. Commit & push  
+10. Authenticate with ArgoCD  
+11. Delete apps if `delete_first`  
+12. Create apps  
+13. Sync  
+14. Wait for sync (unless skipped)  
 
 ---
 
 ## 🧪 Example Usage
 
-Single-app deploy (global cluster override):
 ```yaml
 jobs:
   deploy:
@@ -268,7 +255,7 @@ jobs:
       cd_repo: my-org/continuous-deployment
       github_environment: prod
       target: prod
-      target_cluster: aks-prod-weu     # resolves this cluster directly
+      target_cluster: aks-prod-weu
       namespace: my-namespace
       application: my-app
       deploy_path: manifests/overlays/prod
@@ -281,22 +268,6 @@ jobs:
       ARGOCD_CA_CERT: ${{ secrets.ARGOCD_CA_CERT }}
 ```
 
-Multi-app deploy (single-cluster target only):
-```yaml
-with:
-  runner: my-self-hosted
-  cd_repo: my-org/continuous-deployment
-  github_environment: qa
-  target: qa
-  namespace: qa-namespace
-  application_details: |
-    [
-      {"name":"service1","images":["repo/service1"],"path":"services/service1/overlays/qa"},
-      {"name":"service2","images":["repo/service2"],"path":"apps/service2/overlays/qa"}
-    ]
-  env_map: ${{ secrets.ENV_MAP_JSON }}
-```
-
 ---
 
 ## 🏗 ArgoCD URL Assumption
@@ -305,11 +276,6 @@ ArgoCD ingress must be reachable at:
 
 ```
 https://${cluster}-argocd-argocd-web-ui.${dns_zone}
-```
-
-Example:
-```
-https://aks-prod-weu-argocd-argocd-web-ui.internal.example.com
 ```
 
 ---
@@ -329,14 +295,11 @@ https://aks-prod-weu-argocd-argocd-web-ui.internal.example.com
 
 ### 🔖 Versioning
 
-- `@v2` – Latest **beta** version  
-- `@v1` – Latest stable v1 series
+- `@v2` – Latest beta  
+- `@v1` – Stable v1 series
 
 ---
 
 ## 📜 License
-Licensed under MIT.  
-Third-party actions are listed in [THIRD-PARTY-ACTIONS-AND-TOOLS.md](./THIRD-PARTY-ACTIONS-AND-TOOLS.md).  
-
-
-
+MIT.  
+Third-party actions listed in [THIRD-PARTY-ACTIONS-AND-TOOLS.md](./THIRD-PARTY-ACTIONS-AND-TOOLS.md).

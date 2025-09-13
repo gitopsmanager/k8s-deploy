@@ -128,10 +128,6 @@ on:
         required: false
         default: false
         type: boolean
-      convert_jinja:
-        required: false
-        type: boolean
-        default: false
       debug:
         required: false
         type: boolean
@@ -411,49 +407,11 @@ jobs:
           core.setOutput('apps', JSON.stringify(apps));
           core.setOutput('count', String(apps.length));
 
-    # Optional Jinja → envsubst conversion (per app paths)
-    - name: Convert Jinja2 {{ var }} to envsubst ${var} (skip Jinja control files)
-      if: ${{ inputs.convert_jinja }}
+
+    - name: Render manifests with Nunjucks (Jinja2-style)
       uses: actions/github-script@v7
       env:
         APPS: ${{ steps.apps.outputs.apps }}
-      with:
-        script: |
-          const { execSync } = require('child_process');
-          const apps = JSON.parse(process.env.APPS || '[]');
-          for (const app of apps) {
-            const src = `source/${app.path}`;
-            execSync(`bash -lc 'if [ -d "${src}" ]; then \
-              find "${src}" \\( -name "*.yaml" -o -name "*.yml" -o -name "*.json" \\) -type f -print0 | \
-              while IFS= read -r -d "" f; do \
-                if ! grep -q "{%" "$f"; then sed -E -i "s/\\{\\{\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*\\}\\}/\\$\\{\\1\\}/g" "$f"; fi; \
-              done; fi'`, { stdio: 'inherit' });
-          }
-
-
-    - name: Collect manifest files needing envsubst
-      id: collect
-      run: |
-        # Find YAML/JSON files that contain ${...}
-        files=$(find source -type f \( -name "*.yaml" -o -name "*.yml" -o -name "*.json" \) \
-                  -exec grep -l '\${' {} + || true)
-
-        # Turn into JSON array manually
-        out="["
-        sep=""
-        for f in $files; do
-          out="$out$sep\"$f\""
-          sep=","
-        done
-        out="$out]"
-
-        echo "files=$out" >> $GITHUB_OUTPUT
-
-
-    - name: Template manifest files with envsubst
-      uses: actions/github-script@v7
-      env:
-        FILES: ${{ steps.collect.outputs.files }}
         CLUSTER_NAME: ${{ steps.env.outputs.cluster }}
         DNS_ZONE: ${{ steps.env.outputs.dns_zone }}
         NAMESPACE: ${{ inputs.namespace }}
@@ -461,26 +419,52 @@ jobs:
         CONTAINER_REGISTRY: ${{ steps.env.outputs.container_registry }}
       with:
         script: |
-          const { execSync } = require('child_process');
-          const files = JSON.parse(process.env.FILES || '[]');
+          const fs = require('fs');
+          const path = require('path');
+          const nunjucks = require('nunjucks');
 
-          for (const f of files) {
-            console.log(`Templating ${f}`);
-            execSync(
-              `envsubst < "${f}" > "${f}.tmp" && mv "${f}.tmp" "${f}"`,
-              {
-                env: {
-                  ...process.env,
-                  CLUSTER_NAME: process.env.CLUSTER_NAME,
-                  DNS_ZONE: process.env.DNS_ZONE,
-                  NAMESPACE: process.env.NAMESPACE,
-                  APPLICATION: process.env.APPLICATION_DEFAULT,
-                  CONTAINER_REGISTRY: process.env.CONTAINER_REGISTRY,
-                },
-                stdio: 'inherit',
+          // Vars available to templates
+          const vars = {
+            CLUSTER_NAME: process.env.CLUSTER_NAME,
+            DNS_ZONE: process.env.DNS_ZONE,
+            NAMESPACE: process.env.NAMESPACE,
+            APPLICATION: process.env.APPLICATION_DEFAULT,
+            CONTAINER_REGISTRY: process.env.CONTAINER_REGISTRY,
+          };
+
+          // Configure Nunjucks (no autoescape since these are manifests)
+          nunjucks.configure({ autoescape: false });
+
+          // Recursive file walker
+          function walk(dir) {
+            let results = [];
+            if (!fs.existsSync(dir)) return results;
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+              const full = path.join(dir, entry.name);
+              if (entry.isDirectory()) {
+                results = results.concat(walk(full));
+              } else if (/\.(ya?ml|json)$/i.test(entry.name)) {
+                results.push(full);
               }
-            );
+            }
+            return results;
           }
+
+          const apps = JSON.parse(process.env.APPS || '[]');
+
+          for (const app of apps) {
+            const srcDir = path.join('source', app.path);
+            const files = walk(srcDir);
+
+            for (const f of files) {
+              const template = fs.readFileSync(f, 'utf8');
+              const rendered = nunjucks.renderString(template, vars);
+              fs.writeFileSync(f, rendered, 'utf8');
+              console.log(`Rendered ${f}`);
+            }
+          }
+
+
 
 
     - name: Copy templated files to CD repo (per app)
