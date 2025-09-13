@@ -501,15 +501,21 @@ jobs:
           const overlayDir = (process.env.OVERLAY_DIR || '').trim();
 
           for (const app of apps) {
+            // Normalized layout: just app.name (+ overlays if defined)
             const base = overlayDir
-              ? `${process.env.CD_PATH}/${app.name}/${app.path}/overlays/${overlayDir}`
-              : `${process.env.CD_PATH}/${app.name}/${app.path}`;
+              ? `${process.env.CD_PATH}/${app.name}/overlays/${overlayDir}`
+              : `${process.env.CD_PATH}/${app.name}`;
+
             if ((app.images || []).length === 0) continue;
 
             for (const img of app.images) {
-              execSync(`bash -lc 'cd "${base}" && kustomize edit set image "${img}=*:${process.env.IMAGE_TAG}"'`, { stdio: 'inherit' });
+              execSync(
+                `bash -lc 'cd "${base}" && kustomize edit set image "${img}=*:${process.env.IMAGE_TAG}"'`,
+                { stdio: 'inherit' }
+              );
             }
           }
+
 
     - name: Run kustomize build (concat per app)
       id: kustomize
