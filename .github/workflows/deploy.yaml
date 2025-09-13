@@ -469,7 +469,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: templated-source-manifests
-        path: ${{ steps.render.outputs.result }}
+        path: ${{ steps.render.outputs.result }}/**
 
     - name: Copy manifests to CD repo
       env:
