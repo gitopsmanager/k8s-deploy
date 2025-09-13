@@ -474,7 +474,7 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: templated-source-manifests
+        name: templated-source-manifests-${{ steps.env.outputs.cluster }}
         path: ${{ steps.copy.outputs.cd_path }}
 
     - name: Debug structure
