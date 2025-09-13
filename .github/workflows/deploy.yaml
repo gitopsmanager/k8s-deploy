@@ -159,14 +159,6 @@ jobs:
         ref: ${{ inputs.ref }}
         sparce-checkout: ${{ inputs.deploy_path }}
 
-    - name: Ensure envsubst installed
-      shell: bash
-      run: |
-        set -e
-        if ! command -v envsubst >/dev/null 2>&1; then
-          sudo apt-get update
-          sudo apt-get install -y gettext
-        fi
 
     - name: Generate GitHub App token
       id: generate_token
