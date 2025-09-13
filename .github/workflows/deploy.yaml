@@ -456,7 +456,6 @@ jobs:
           return dirs.join("\n");
 
     - name: Copy manifests to CD repo
-      id: copy
       env:
         CLUSTER_NAME: ${{ steps.env.outputs.cluster }}
         NAMESPACE: ${{ inputs.namespace }}
@@ -464,9 +463,11 @@ jobs:
         mkdir -p continuous-deployment/$CLUSTER_NAME/$NAMESPACE/
         echo "${{ steps.render.outputs.result }}" | while read -r dir; do
           [ -z "$dir" ] && continue
-          cp -r "$dir" continuous-deployment/$CLUSTER_NAME/$NAMESPACE/
+          echo "Copying $dir -> continuous-deployment/$CLUSTER_NAME/$NAMESPACE/"
+          cp -r "$dir/." continuous-deployment/$CLUSTER_NAME/$NAMESPACE/
         done
         echo "cd_path=continuous-deployment/$CLUSTER_NAME/$NAMESPACE" >> $GITHUB_OUTPUT
+
 
     - name: Upload CD repo manifests
       if: always()
