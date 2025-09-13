@@ -469,13 +469,18 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: templated-source-manifests
-        path: ${{ steps.render.outputs.templated_dirs }}
+        path: ${{ steps.render.outputs.result }}
 
     - name: Copy manifests to CD repo
+      env:
+        CLUSTER_NAME: ${{ steps.env.outputs.cluster }}
+        NAMESPACE: ${{ inputs.namespace }}
       run: |
-        for dir in ${{ steps.render.outputs.templated_dirs }}; do
-          cp -r "$dir" continuous-deployment/${CLUSTER_NAME}/${NAMESPACE}/
+        for dir in ${{ steps.render.outputs.result }}; do
+          mkdir -p continuous-deployment/$CLUSTER_NAME/$NAMESPACE/
+          cp -r "$dir" continuous-deployment/$CLUSTER_NAME/$NAMESPACE/
         done
+
 
 
 
