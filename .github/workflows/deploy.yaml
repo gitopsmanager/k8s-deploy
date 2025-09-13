@@ -647,9 +647,6 @@ jobs:
             }
           }
 
-
-
-
     - name: Check or create ArgoCD applications (per app)
       uses: actions/github-script@v7
       env:
@@ -659,31 +656,66 @@ jobs:
         CD_REPO: ${{ inputs.cd_repo }}
         ARGOCD_URL: ${{ steps.argocd_conn.outputs.argocd_url }}
         ARGOCD_TOKEN: ${{ steps.argocd_conn.outputs.token }}
-        CURL_SSL_FLAGS: ${{ steps.argocd_conn.outputs.curl_ssl_flags }}
         NAMESPACE: ${{ inputs.namespace }}
       with:
         script: |
-          const { execSync } = require('child_process');
+          const fs = require('fs');
+          const path = require('path');
+          const nunjucks = require('./nunjucks.js');
+          
           const apps = JSON.parse(process.env.APPS || '[]');
+          
           for (const app of apps) {
             const appName = `${process.env.NAMESPACE}-${app.name}`;
             const statusUrl = `${process.env.ARGOCD_URL}/api/v1/applications/${appName}`;
+
             const cdPath = (process.env.OVERLAY_DIR || '').trim()
               ? `${process.env.CD_ROOT}/${app.name}/${app.path}/overlays/${process.env.OVERLAY_DIR}`
               : `${process.env.CD_ROOT}/${app.name}/${app.path}`;
 
-            const http = execSync(`bash -lc 'curl ${process.env.CURL_SSL_FLAGS} -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" "${statusUrl}"'`, { encoding: 'utf8' }).trim();
-            if (http === '200') { core.info(`✅ Argo app ${appName} exists.`); continue; }
-            if (http !== '403') { core.setFailed(`❌ Unexpected ArgoCD response for ${appName}: HTTP ${http}`); return; }
+            // --- Check if app exists
+            const res = await fetch(statusUrl, {
+              headers: { Authorization: `Bearer ${process.env.ARGOCD_TOKEN}` }
+            });
 
-            # Create app from template via envsubst
-            execSync(`bash -lc 'APP_NAME="${appName}" CD_REPO="${process.env.CD_REPO}" CD_PATH="${cdPath}" NAMESPACE="${process.env.NAMESPACE}" \
-              envsubst < reusable/templates/argocd-application-template.json > rendered-app.json && \
-              curl ${process.env.CURL_SSL_FLAGS} -s -X POST "${process.env.ARGOCD_URL}/api/v1/applications" \
-                -H "Content-Type: application/json" -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" \
-                --data-binary @rendered-app.json'`, { stdio: 'inherit' });
+            if (res.status === 200) {
+              core.info(`✅ Argo app ${appName} exists.`);
+              continue;
+            }
+            if (res.status !== 403) {
+              core.setFailed(`❌ Unexpected ArgoCD response for ${appName}: HTTP ${res.status}`);
+              return;
+            }
+
+            // --- Render JSON with Nunjucks
+            const templatePath = 'reusable/templates/argocd-application-template.json.j2';
+            const template = fs.readFileSync(templatePath, 'utf8');
+            const rendered = nunjucks.renderString(template, {
+              APP_NAME: appName,
+              NAMESPACE: process.env.NAMESPACE,
+              CD_REPO: process.env.CD_REPO,
+              CD_PATH: cdPath
+            });
+
+            // --- POST to ArgoCD
+            const createRes = await fetch(`${process.env.ARGOCD_URL}/api/v1/applications`, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${process.env.ARGOCD_TOKEN}`,
+                'Content-Type': 'application/json'
+              },
+              body: rendered
+            });
+
+            if (!createRes.ok) {
+              const text = await createRes.text();
+              core.setFailed(`❌ Failed to create Argo app ${appName}: ${createRes.status} ${text}`);
+              return;
+            }
+
             core.info(`✅ Created Argo app ${appName}.`);
           }
+
 
     - name: Sync ArgoCD apps (per app)
       uses: actions/github-script@v7
