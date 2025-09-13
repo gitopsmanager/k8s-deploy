@@ -453,7 +453,7 @@ jobs:
           }
 
           // github-script: anything you return is exposed as "steps.render.outputs.result"
-          return dirs.join(" ");
+          return dirs.join("\n");
 
 
     - name: Upload templated manifests
@@ -461,17 +461,19 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: templated-source-manifests
-        path: ${{ steps.render.outputs.result }}/**
+        path: ${{ steps.render.outputs.result }}
 
     - name: Copy manifests to CD repo
       env:
         CLUSTER_NAME: ${{ steps.env.outputs.cluster }}
         NAMESPACE: ${{ inputs.namespace }}
       run: |
-        for dir in ${{ steps.render.outputs.result }}; do
+        echo "${{ steps.render.outputs.result }}" | while read -r dir; do
+          [ -z "$dir" ] && continue
           mkdir -p continuous-deployment/$CLUSTER_NAME/$NAMESPACE/
           cp -r "$dir" continuous-deployment/$CLUSTER_NAME/$NAMESPACE/
         done
+
 
 
 
