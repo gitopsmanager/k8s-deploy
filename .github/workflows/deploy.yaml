@@ -154,10 +154,10 @@ jobs:
     - name: Checkout repo
       uses: actions/checkout@v4
       with:
+        fetch-depth: 1
         repository: ${{ github.repository }}
         path: source
         ref: ${{ inputs.ref }}
-        sparce-checkout: ${{ inputs.deploy_path }}
 
 
     - name: Generate GitHub App token
