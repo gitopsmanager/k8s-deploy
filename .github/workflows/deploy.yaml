@@ -565,14 +565,16 @@ jobs:
 
           for (const app of apps) {
             const dir = overlayDir
-              ? `${process.env.CD_PATH}/${app.name}/${app.path}/overlays/${overlayDir}`
-              : `${process.env.CD_PATH}/${app.name}/${app.path}`;
+              ? `${process.env.CD_PATH}/${app.name}/overlays/${overlayDir}`
+              : `${process.env.CD_PATH}/${app.name}`;
+
             const yaml = execSync(`bash -lc 'cd "${dir}" && kustomize build .'`, { encoding: 'utf8' });
             fs.appendFileSync(outFile, (first ? '' : '\n---\n') + yaml);
             first = false;
           }
 
           return outFile;
+
 
     - name: Upload built manifest as artifact
       if: always()
