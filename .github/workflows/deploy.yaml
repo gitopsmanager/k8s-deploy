@@ -414,21 +414,19 @@ jobs:
 
 
     - name: Render manifests with Nunjucks (Jinja2-style)
+      id: render
       uses: actions/github-script@v7
       env:
         APPS: ${{ steps.apps.outputs.apps }}
-        CLUSTER_NAME: ${{ steps.env.outputs.cluster }}
-        DNS_ZONE: ${{ steps.env.outputs.dns_zone }}
-        NAMESPACE: ${{ inputs.namespace }}
-        APPLICATION_DEFAULT: ${{ inputs.application }}
-        CONTAINER_REGISTRY: ${{ steps.env.outputs.container_registry }}
+        ...
       with:
         script: |
           const fs = require('fs');
           const path = require('path');
           const nunjucks = require('./nunjucks.js');
+          const apps = JSON.parse(process.env.APPS || '[]');
+          let dirs = [];
 
-          // Vars available to templates
           const vars = {
             CLUSTER_NAME: process.env.CLUSTER_NAME,
             DNS_ZONE: process.env.DNS_ZONE,
@@ -437,55 +435,40 @@ jobs:
             CONTAINER_REGISTRY: process.env.CONTAINER_REGISTRY,
           };
 
-          // Configure Nunjucks (no autoescape since these are manifests)
           nunjucks.configure({ autoescape: false });
-
-          // Recursive file walker
-          function walk(dir) {
-            let results = [];
-            if (!fs.existsSync(dir)) return results;
-            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-              const full = path.join(dir, entry.name);
-              if (entry.isDirectory()) {
-                results = results.concat(walk(full));
-              } else if (/\.(ya?ml|json)$/i.test(entry.name)) {
-                results.push(full);
-              }
-            }
-            return results;
-          }
-
-          const apps = JSON.parse(process.env.APPS || '[]');
 
           for (const app of apps) {
             const srcDir = path.join('source', app.path);
-            const files = walk(srcDir);
-
+            dirs.push(srcDir);
+            // Walk & template
+            const files = fs.existsSync(srcDir)
+              ? fs.readdirSync(srcDir, { withFileTypes: true }).map(e => path.join(srcDir, e.name))
+              : [];
             for (const f of files) {
-              const template = fs.readFileSync(f, 'utf8');
-              const rendered = nunjucks.renderString(template, vars);
-              fs.writeFileSync(f, rendered, 'utf8');
-              console.log(`Rendered ${f}`);
+              if (/\.(ya?ml|json)$/i.test(f)) {
+                const template = fs.readFileSync(f, 'utf8');
+                const rendered = nunjucks.renderString(template, vars);
+                fs.writeFileSync(f, rendered, 'utf8');
+                console.log(`Rendered ${f}`);
+              }
             }
           }
+          core.setOutput("templated_dirs", dirs.join(" "));
 
-
-
-
-    - name: Copy templated files to CD repo (per app)
-      uses: actions/github-script@v7
-      env:
-        APPS: ${{ steps.apps.outputs.apps }}
-        CD_ROOT: ${{ env.CD_ROOT }}
+    - name: Upload templated manifests
+      if: always()
+      uses: actions/upload-artifact@v4
       with:
-        script: |
-          const { execSync } = require('child_process');
-          const apps = JSON.parse(process.env.APPS || '[]');
-          for (const app of apps) {
-            const src = `source/${app.path}`;
-            const dst = `cd/${process.env.CD_ROOT}/${app.name}/${app.path}`;
-            execSync(`bash -lc 'mkdir -p "${dst}"; rm -rf "${dst}"/* || true; cp -r "${src}/." "${dst}/"'`, { stdio: 'inherit' });
-          }
+        name: templated-source-manifests
+        path: ${{ steps.render.outputs.templated_dirs }}
+
+    - name: Copy manifests to CD repo
+      run: |
+        for dir in ${{ steps.render.outputs.templated_dirs }}; do
+          cp -r "$dir" continuous-deployment/${CLUSTER_NAME}/${NAMESPACE}/
+        done
+
+
 
     - name: Debug structure
       if: ${{ inputs.debug }}
@@ -541,16 +524,13 @@ jobs:
           }
 
     - name: Upload built manifest as artifact
+      if: always()
       uses: actions/upload-artifact@v4
       with:
         name: built-kustomize-manifest
         path: build-output.yaml
 
-    - name: Upload templated source manifests as artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: templated-source-manifests
-        path: source
+
 
     - name: Commit and push to continuous-deployment repo
       run: |
