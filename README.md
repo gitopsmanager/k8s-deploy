@@ -225,6 +225,27 @@ env:
 
 ---
 
+## 🔧 Actions Used
+
+| Action | Version | Purpose |
+|--------|---------|---------|
+| [`actions/checkout`](https://github.com/actions/checkout) | `v4` | Checkout source, reusable, and CD repos |
+| [`actions/create-github-app-token`](https://github.com/actions/create-github-app-token) | `v2` | Generate GitHub App token for CD repo access |
+| [`gitopsmanager/detect-cloud`](https://github.com/gitopsmanager/detect-cloud) | `v1` | Detect cloud provider (AWS, Azure, GCP, unknown) |
+| [`actions/github-script`](https://github.com/actions/github-script) | `v7` | Used extensively for JSON parsing, cluster selection, templating, ArgoCD API calls, etc. |
+| [`imranismail/setup-kustomize`](https://github.com/imranismail/setup-kustomize) | `v2` | Install kustomize for manifest builds |
+| [`actions/upload-artifact`](https://github.com/actions/upload-artifact) | `v4` | Upload templated manifests and built kustomize manifests |
+
+---
+
+## 📦 Artifacts Produced
+
+| Artifact name | Contents | Notes |
+|---------------|----------|-------|
+| `templated-source-manifests-<cluster>` | Application manifests after **Nunjucks (Jinja2-style) templating** | Shows cluster-specific substitutions and injected UAMI vars |
+| `built-kustomize-manifest-<cluster>`  | Final combined YAML output from `kustomize build` | Ready-to-apply manifests, concatenated with `---` delimiters |
+---
+
 ## 🧪 Example Usage
 
 ```yaml

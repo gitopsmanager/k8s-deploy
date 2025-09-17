@@ -187,7 +187,7 @@ jobs:
 
     - name: Detect cloud
       id: cloud
-      uses: gitopsmanager/detect-cloud@main
+      uses: gitopsmanager/detect-cloud@v1
       with:
         timeout-ms: 800
 
