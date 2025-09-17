@@ -669,12 +669,11 @@ jobs:
           echo "❌ ARGOCD_CA_CERT is not set"
         else
           echo "✅ ARGOCD_CA_CERT is set (length: ${#ARGOCD_CA_CERT})"
-          echo "First line:"
-          echo "${ARGOCD_CA_CERT}" | head -n 1
         fi
       shell: bash
       env:
         ARGOCD_CA_CERT: ${{ secrets.ARGOCD_CA_CERT }}
+
 
 
     - name: Set ArgoCD connection (token & URLs)
