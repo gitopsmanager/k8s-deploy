@@ -792,6 +792,52 @@ jobs:
             }
           }
 
+    - name: Clear apps from CD repo (delete_only mode)
+      if: ${{ inputs.delete_only }}
+      uses: actions/github-script@v7
+      env:
+        CD_PATH_REL: ${{ steps.cdroot.outputs.cd_root }}
+        APPS: ${{ steps.apps.outputs.apps }}
+      with:
+        script: |
+          const fs = require('fs');
+          const path = require('path');
+          const { execSync } = require('child_process');
+
+          const apps = JSON.parse(process.env.APPS || '[]');
+          const cdRootRel = process.env.CD_PATH_REL;
+
+          for (const app of apps) {
+            const appDir = path.join('continuous-deployment', cdRootRel, app.name);
+            if (fs.existsSync(appDir)) {
+              core.info(`🗑️ Removing app directory: ${appDir}`);
+              execSync(`rm -rf "${appDir}"`);
+            } else {
+              core.info(`⚠️ Directory not found for app: ${app.name}`);
+            }
+          }
+
+          core.setOutput('cd_path_rel', cdRootRel);
+
+    - name: Commit and push deletions to CD repo
+      if: ${{ inputs.delete_only }}
+      run: |
+        set -euo pipefail
+        git -C continuous-deployment config user.name "k8s-deploy"
+        git -C continuous-deployment config user.email "actions@gitopsmanager.com"
+
+        echo "Staging deletions in: ${{ steps.cdroot.outputs.cd_root }}/"
+        git -C continuous-deployment rm -r "${{ steps.cdroot.outputs.cd_root }}/" || true
+
+        if git -C continuous-deployment diff --cached --quiet; then
+          echo "✅ No deletions to commit."
+          exit 0
+        fi
+
+        git -C continuous-deployment commit -m "Delete apps in ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} (delete_only mode)"
+        git -C continuous-deployment push
+
+
 
 
     - name: Check or create ArgoCD applications (per app)
