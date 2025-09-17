@@ -306,6 +306,7 @@ jobs:
 
     - name: Export UAMI env vars (uami_name => client_id)
       id: uami
+      if: ${{ inputs.delete_only == false }}
       uses: actions/github-script@v7
       env:
         UAMI_JSON: ${{ steps.env.outputs.uami_map }}
@@ -540,6 +541,7 @@ jobs:
       run: find "${{ steps.copy.outputs.cd_path }}" || echo "Nothing copied!"
 
     - name: Setup Kustomize
+      if: ${{ inputs.delete_only == false }}
       uses: imranismail/setup-kustomize@v2
       with:
         kustomize-version: ${{ inputs.kustomize_version }}
@@ -620,6 +622,7 @@ jobs:
         path: build-output.yaml
 
     - name: Commit and push to continuous-deployment repo
+      if: ${{ inputs.delete_only == false }}
       run: |
         set -euo pipefail
 
