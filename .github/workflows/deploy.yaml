@@ -52,7 +52,7 @@ on:
         required: true
         type: string
       github_environment:
-        required: true
+        required: false
         type: string
       # Mode A (single app)
       application:

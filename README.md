@@ -15,25 +15,26 @@ It renders manifest files using **Jinja2-style templating implemented with [Nunj
 ### Core
 | Name                 | Required | Type     | Default | Description |
 |----------------------|----------|----------|---------|-------------|
-| `runner`             | ✅       | string   | –       | Label of the self-hosted runner (must have cluster access) |
-| `cd_repo`            | ✅       | string   | –       | Continuous deployment repo where templated manifests are committed |
-| `github_environment` | ✅       | string   | –       | GitHub Environment for approvals and env-scoped secrets |
+| `github_runner`      | ✅       | string   | –       | Label of the self-hosted runner (must have cluster access) |
+| `namespace`          | ✅       | string   | –       | Kubernetes namespace for deployment |
 | `target`             | ✅       | string   | `dev`   | Logical environment (`dev`, `qa`, `prod`). Still required even if `target_cluster` is set, as it controls approvals and environment scoping. |
 | `target_cluster`     | ❌       | string   | `""`    | If set, resolves the cluster **globally across all `env_map` environments** by matching the `cluster` name. If omitted, the cluster is resolved from the given `target` environment only. |
-| `namespace`          | ✅       | string   | –       | Kubernetes namespace for deployment |
-| `ref`                | ❌       | string   | –       | Git reference (branch, tag, or commit SHA) for source repo checkout |
+| `ref`                | ❌       | string   | `${{ github.ref || github.sha }}` | Git reference (branch, tag, or commit SHA) for source repo checkout |
 | `delete_first`       | ❌       | boolean  | `false` | Delete ArgoCD app(s) before deploying |
+| `cd_repo`            | ✅       | string   | –       | Continuous deployment repo where templated manifests are committed |
+| `cd_repo_org`        | ✅       | string   | –       | Continuous deployment repo organization |
+| `github_environment` | ❌       | string   | –       | GitHub Environment for approvals and env-scoped secrets |
 
 ---
 
 ### Deployment Modes
 - **Mode A: Single App**
   - `application` (string)  
-  - `deploy_path` (string)  
+  - `deploy_path` (string, default `Deployments`)  
   - `image_tag` (string, optional)  
   - `image_base_name` (string, optional)  
   - `image_base_names` (comma-separated string, optional)  
-  - `overlay_dir` (string, optional)
+  - `overlay_dir` (string, required)
 
 - **Mode B: Multi App**
   - `application_details` (JSON array, optional)  
@@ -52,7 +53,7 @@ The workflow needs an `env_map` that defines your environments, clusters, and re
 You can provide it in **two ways**:
 
 1. As a workflow input (`with: env_map: "<JSON>"`) ✅ **preferred**  
-2. As an environment variable (`env: ENV_MAP: "<JSON>"`) — fallback for self-hosted runners  
+2. As an environment variable (`ENV_MAP` from the runner) — fallback for self-hosted runners  
 
 If neither is provided, the workflow fails.
 
@@ -61,14 +62,13 @@ If neither is provided, the workflow fails.
 #### Cluster Resolution Logic
 
 1. If `target_cluster` is set:  
-   - The workflow searches **all clusters across all environments** in the `env_map`.  
-   - If it finds a matching cluster name, it selects that cluster (and its `dns_zone`, `container_registry`, `uami_map`) regardless of the `target` environment.  
-   - This makes it possible to directly target a cluster by name while still requiring `target` for approvals.  
+   - Searches **all clusters across all environments** in the `env_map`.  
+   - Selects by exact cluster name (case-insensitive).  
 
 2. If `target_cluster` is not set:  
-   - The workflow looks inside the `target` environment only.  
-   - If that environment has a **single cluster**, it is selected automatically.  
-   - If the environment has **multiple clusters**, the workflow fails with a clear error message and lists valid options.  
+   - Looks inside the `target` environment only.  
+   - If single cluster → use it.  
+   - If multiple clusters → fail with error listing options.  
 
 ---
 
@@ -94,37 +94,35 @@ If neither is provided, the workflow fails.
 
 ---
 
-#### Example Usages
-
-**Targeting a cluster globally (preferred for multi-cluster envs):**
-```yaml
-with:
-  target: prod
-  target_cluster: aks-prod-weu
-  env_map: ${{ secrets.ENV_MAP_JSON }}
-```
-
-**Targeting a single-cluster environment (no `target_cluster` needed):**
-```yaml
-with:
-  target: dev
-  env_map: ${{ secrets.ENV_MAP_JSON }}
-```
-
----
 
 ## 🔑 UAMI Mapping for Azure Workload Identity
 
 When deploying to **Azure AKS**, some clusters may define **User Assigned Managed Identities (UAMIs)** in the `env_map`.  
-This workflow automatically exports those UAMI client IDs as environment variables so they can be used for manifest templating.
+These are passed as an array under `uami_map`:
+
+```json
+"uami_map": [
+  {
+    "uami_name": "prodcluster-app-uami",
+    "uami_resource_group": "rg-demo",
+    "client_id": "1111-aaaa"
+  },
+  {
+    "uami_name": "sidecar-uami",
+    "uami_resource_group": "rg-demo",
+    "client_id": "2222-bbbb"
+  }
+]
+```
 
 ---
 
-### How It Works
-For each `uami_map` entry in the selected cluster:
+### How UAMI vars are exported
+
+For each entry:
 
 1. **Take the `uami_name`**  
-   - If it starts with `<cluster>-` (the selected cluster name followed by a dash), that prefix is **removed**.  
+   - If it starts with `<cluster_name>-` (the selected cluster name followed by a dash), that prefix is **removed**.  
      - Example: `prodcluster-app-uami` → `app-uami`.
 
 2. **Normalize the name**  
@@ -134,32 +132,29 @@ For each `uami_map` entry in the selected cluster:
      - Example: `123-identity` → `_123_identity`.
 
 3. **Export as environment variable**  
-   - Variable name = normalized `uami_name`.  
+   - Variable name = normalized `uami_name` (lowercased).  
    - Value = `client_id` of the UAMI.  
-   - Written into `$GITHUB_ENV`, so it’s available to all subsequent steps.  
+   - Written into `$GITHUB_ENV`, so it’s available to all subsequent steps.
 
 4. **Deduplicate**  
    - If two UAMIs normalize to the same name, duplicates are skipped with a warning.
 
 ---
 
-### Example
+### Example Result
+
+Input:
 
 ```json
-{
-  "cluster": "prodcluster",
-  "dns_zone": "internal.example.com",
-  "container_registry": "ghcr.io/my-org",
-  "uami_map": [
-    {"uami_name": "prodcluster-app-uami", "uami_resource_group": "rg-demo", "client_id": "1111-aaaa"},
-    {"uami_name": "sidecar-uami", "uami_resource_group": "rg-demo", "client_id": "2222-bbbb"}
-  ]
-}
+"uami_map": [
+  {"uami_name": "prodcluster-app-uami", "uami_resource_group": "rg-demo", "client_id": "1111-aaaa"},
+  {"uami_name": "sidecar-uami", "uami_resource_group": "rg-demo", "client_id": "2222-bbbb"}
+]
 ```
 
-Exports:
+Output exported vars:
 
-```
+```bash
 app_uami=1111-aaaa
 sidecar_uami=2222-bbbb
 ```
@@ -168,7 +163,7 @@ sidecar_uami=2222-bbbb
 
 ### Usage in Manifests
 
-You can reference these exported variables during **Jinja2 templating with Nunjucks**:  
+You can reference these exported variables during **Jinja2 templating with Nunjucks**:
 
 ```yaml
 env:
@@ -180,21 +175,6 @@ env:
 
 ---
 
-### Using Nunjucks in GitHub Actions without npm install
-
-Normally, you would install Nunjucks via `npm install nunjucks`, but `actions/github-script`
-does not have access to modules installed at runtime. To keep things lightweight and fast,
-you can **download the prebuilt UMD bundle** of Nunjucks directly before using it.
-
-```yaml
-- name: Download Nunjucks UMD bundle
-  run: |
-    curl -sSL https://cdnjs.cloudflare.com/ajax/libs/nunjucks/3.2.4/nunjucks.min.js -o nunjucks.js
-
----
-
-
-
 ### ArgoCD / Misc
 | Name                | Required | Type    | Default  | Description |
 |---------------------|----------|---------|----------|-------------|
@@ -202,9 +182,8 @@ you can **download the prebuilt UMD bundle** of Nunjucks directly before using i
 | `argocd_username`   | ❌       | string  | –        | ArgoCD username (basic auth fallback) |
 | `argocd_password`   | ❌       | string  | –        | ArgoCD password (basic auth fallback) |
 | `kustomize_version` | ❌       | string  | `5.0.1`  | Version of kustomize to install |
-| `skip_status_check` | ❌       | string  | `false`  | Skip waiting for ArgoCD sync |
+| `skip_status_check` | ❌       | boolean | `false`  | Skip waiting for ArgoCD sync |
 | `insecure_argo`     | ❌       | boolean | `false`  | Disable TLS verification for ArgoCD API |
-| `convert_jinja`     | ❌       | boolean | `false`  | (Legacy) Convert `{{ var }}` → `${var}` placeholders before templating. No longer required if using Jinja2 templating directly. |
 | `debug`             | ❌       | boolean | `false`  | Print copied directory structure |
 
 ---
@@ -220,23 +199,10 @@ you can **download the prebuilt UMD bundle** of Nunjucks directly before using i
 
 ---
 
-## 🔧 Actions Used
-
-| Action | Version | Purpose |
-|--------|---------|---------|
-| [`actions/checkout`](https://github.com/actions/checkout) | `v4` | Checkout repos |
-| [`actions/create-github-app-token`](https://github.com/actions/create-github-app-token) | `v2` | Generate GitHub App token |
-| [`gitopsmanager/detect-cloud`](https://github.com/gitopsmanager/detect-cloud) | `main` | Detect cloud provider |
-| [`actions/github-script`](https://github.com/actions/github-script) | `v7` | JSON parsing, cluster selection, templating with Nunjucks |
-| [`imranismail/setup-kustomize`](https://github.com/imranismail/setup-kustomize) | `v2` | Install kustomize |
-| [`actions/upload-artifact`](https://github.com/actions/upload-artifact) | `v4` | Upload artifacts |
-
----
-
 ## 📦 Artifacts
 
-- **`templated-source-manifests`** – manifests after **Jinja2 templating with Nunjucks**  
-- **`built-kustomize-manifest`** – final rendered YAML from `kustomize build`  
+- **`templated-source-manifests-<cluster>`** – manifests after **Jinja2 templating with Nunjucks**  
+- **`built-kustomize-manifest-<cluster>`** – final rendered YAML from `kustomize build`  
 
 ---
 
@@ -266,8 +232,9 @@ jobs:
   deploy:
     uses: gitopsmanager/k8s-deploy/.github/workflows/deploy.yaml@v2
     with:
-      runner: my-self-hosted
-      cd_repo: my-org/continuous-deployment
+      github_runner: my-self-hosted
+      cd_repo: continuous-deployment
+      cd_repo_org: my-org
       github_environment: prod
       target: prod
       target_cluster: aks-prod-weu
@@ -295,26 +262,14 @@ https://${cluster}-argocd-argocd-web-ui.${dns_zone}
 
 ---
 
-## 📦 ArgoCD App Details
+## 🔖 Versioning
 
-| Field                  | Value |
-|------------------------|-------|
-| `project`              | `default` |
-| `name`                 | `${namespace}-${application}` |
-| `source.repoURL`       | `https://github.com/${cd_repo}` |
-| `source.path`          | `${cluster}/${namespace}/${application}/...` |
-| `destination.server`   | `https://kubernetes.default.svc` |
-| `destination.namespace`| `${namespace}` |
-
----
-
-### 🔖 Versioning
-
-- `@v2` – Latest beta  
-- `@v1` – Stable v1 series
+- `@v2` – Stable v2 series  
+- `@v1` – Legacy v1 series  
 
 ---
 
 ## 📜 License
 MIT.  
 Third-party actions listed in [THIRD-PARTY-ACTIONS-AND-TOOLS.md](./THIRD-PARTY-ACTIONS-AND-TOOLS.md).
+
