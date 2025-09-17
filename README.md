@@ -197,12 +197,6 @@ env:
 | `ARGOCD_CA_CERT`                       | ❌        | PEM CA cert for ArgoCD endpoint |
 | `ARGOCD_USERNAME` / `ARGOCD_PASSWORD`  | ❌        | Fallback basic auth credentials |
 
----
-
-## 📦 Artifacts
-
-- **`templated-source-manifests-<cluster>`** – manifests after **Jinja2 templating with Nunjucks**  
-- **`built-kustomize-manifest-<cluster>`** – final rendered YAML from `kustomize build`  
 
 ---
 
