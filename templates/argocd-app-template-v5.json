@@ -2,22 +2,19 @@
   "apiVersion": "argoproj.io/v1alpha1",
   "kind": "Application",
   "metadata": {
-    "name": "${APP_NAME}"
+    "name": "{{ APP_NAME }}"
   },
   "spec": {
     "project": "default",
     "source": {
-      "repoURL": "https://github.com/${CD_REPO}",
-      "path": "${CD_PATH}",
-      "targetRevision": "main"
+      "repoURL": "https://github.com/{{ CD_REPO_ORG }}/{{ CD_REPO }}",
+      "path": "{{ CD_PATH }}"
     },
     "destination": {
       "server": "https://kubernetes.default.svc",
-      "namespace": "${NAMESPACE}"
+      "namespace": "{{ NAMESPACE }}"
     },
-    "syncPolicy": {
-      "automated": null
-    }
+    "syncPolicy": {}
   }
 }
 

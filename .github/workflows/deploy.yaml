@@ -1,47 +1,68 @@
 # deploy.yaml
 # Copyright (c) 2025 Affinity7 Consulting Ltd
+# Version: v2 (reusable, minimal auth precedence)
 # SPDX-License-Identifier: MIT
-#
-# This workflow is licensed under the MIT License.
-# See https://github.com/gitopsmanager/k8s-deploy/blob/main/LICENSE for details.
-
-# .github/workflows/deploy.yaml
 
 on:
   workflow_call:
     inputs:
-      runner:
-        required: false
-        type: string
-        default: ubuntu-latest
-      cd_repo:
-        required: true
-        type: string
-      environment:
-        required: true
-        type: string
-      application:
+      github_runner:
         required: true
         type: string
       namespace:
         required: true
         type: string
-      repo:
+      target:
+        description: >
+          The environment to deploy to (e.g., `dev`, `qa`, `prod`).
+
+          - If the environment maps to a **single cluster** in `env_map`, this is all you need.
+          - If the environment maps to **multiple clusters**, you must also set `target_cluster`.
         required: true
+        default: "dev"
         type: string
-      repo_path:
-        required: true
+
+      # REQUIRED when env has >1 clusters
+      target_cluster:
+        description: >
+          The specific cluster to deploy to when the selected `target` environment
+          has more than one cluster in `env_map`.
+
+          - For single-cluster environments (like `dev`, `qa`), leave this empty.
+          - For multi-cluster environments (like `prod` with both `aks-prod-weu` and `aks-prod-use`),
+            you must provide one of the valid cluster names from `env_map`.
+
+          Example: `aks-prod-weu`   
+        required: false
+        default: ""
         type: string
-      repo_commit_id:
+      ref:
+        description: "The github ref to use for checking out files"
         required: false
         type: string
-      branch_name:
+        default: ${{ github.ref || github.sha }}
+      delete_first:
+        description: "Delete the namespaced app first before deploying it."
         required: false
-        type: string
-        default: "main"
-      overlay_dir:
+        type: boolean        
+      cd_repo:
         required: true
         type: string
+      cd_repo_org:
+        required: true
+        type: string
+      github_environment:
+        required: true
+        type: string
+      # Mode A (single app)
+      application:
+        required: false
+        type: string
+      deploy_path:
+        description: "The repo path to the deployment files"
+        required: false
+        type: string
+        default: Deployments
       image_tag:
         required: false
         type: string
@@ -51,15 +72,58 @@ on:
       image_base_names:
         required: false
         type: string
+      overlay_dir:
+        required: true
+        type: string
+        default: ""
+
+      # Mode B (multi app)
+      application_details:
+        description: >-
+          JSON array where each item maps:
+          { "name" => application, "images" => image_base_names[], "path" => deploy_path }
+          Example:
+          [
+            {"name":"app1","images":["repo/app1","repo/sidecar"],"path":"services/app1/overlays/prod"},
+            {"name":"app2","images":["repo/app2"],"path":"apps/app2/overlays/prod"}
+          ]
+        required: false
+        type: string
+        default: ''
+
+      # Environment map (single supported shape)
+      env_map:
+        description: >-
+          ONLY this JSON shape is supported:
+          {
+            "<env>": {
+              "cluster_count": N,
+              "clusters": [
+                { "cluster": "...", "dns_zone": "...", "container_registry": "...", "uami_map": [...] }
+              ]
+            }
+          }
+        required: false
+        type: string
+
+      # Argo / misc
+      argocd_auth_token:
+        required: false
+        type: string
+      argocd_username:
+        required: false
+        type: string
+      argocd_password:
+        required: false
+        type: string
       kustomize_version:
         required: false
         type: string
         default: "5.0.1"
       skip_status_check:
-        description: 'If true, skip waiting for ArgoCD sync to complete'
         required: false
-        default: 'false'
-        type: string
+        default: false
+        type: boolean
       insecure_argo:
         required: false
         default: false
@@ -69,341 +133,815 @@ on:
         type: boolean
         default: false
     secrets:
-      ARGO_CD_ADMIN_USER:
-        required: true
-      ARGO_CD_ADMIN_PASSWORD:
-        required: true
       CONTINUOUS_DEPLOYMENT_GH_APP_ID:
         required: true
       CONTINUOUS_DEPLOYMENT_GH_APP_PRIVATE_KEY:
         required: true
       ARGOCD_CA_CERT:
         required: false
-
+      ARGOCD_USERNAME:
+        required: false
+      ARGOCD_PASSWORD:
+        required: false
 
 jobs:
   deploy:
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.github_runner }}
+    environment: ${{ inputs.github_environment }}
     outputs:
-      cd_path: ${{ steps.cdpath.outputs.cd_path }}
+      cd_path: ${{ steps.cdroot.outputs.cd_root }}
     steps:
     - name: Checkout repo
       uses: actions/checkout@v4
       with:
-        repository: ${{ inputs.repo }}
+        fetch-depth: 1
+        repository: ${{ github.repository }}
         path: source
-        ref: ${{ inputs.repo_commit_id != '' && inputs.repo_commit_id || inputs.branch_name }}
+        ref: ${{ inputs.ref }}
 
-
-
-
-    - name: Install yq and envsubst
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y gettext curl
-        YQ_VERSION="v4.40.5"
-        curl -sL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64" -o yq
-        chmod +x yq
-        sudo mv yq /usr/local/bin/yq
 
     - name: Generate GitHub App token
       id: generate_token
-      uses: tibdex/github-app-token@v1
+      uses: actions/create-github-app-token@v2
       with:
-        app_id: ${{ secrets.CONTINUOUS_DEPLOYMENT_GH_APP_ID }}
-        private_key: ${{ secrets.CONTINUOUS_DEPLOYMENT_GH_APP_PRIVATE_KEY }}
-        repository: ${{ inputs.cd_repo }}
+        app-id: ${{ secrets.CONTINUOUS_DEPLOYMENT_GH_APP_ID }}
+        private-key: ${{ secrets.CONTINUOUS_DEPLOYMENT_GH_APP_PRIVATE_KEY }}
+        owner: ${{ inputs.cd_repo_org }}
+        repositories: ${{ inputs.cd_repo }}
+
 
 
     - name: Checkout reusable workflow repo
       uses: actions/checkout@v4
       with:
         repository: gitopsmanager/k8s-deploy
+        ref: v2
         path: reusable
-
 
     - name: Checkout continuous-deployment repo
       uses: actions/checkout@v4
       with:
-        repository: ${{ inputs.cd_repo }}
+        repository: ${{ inputs.cd_repo_org }}/${{ inputs.cd_repo }}
         token: ${{ steps.generate_token.outputs.token }}
-        path: cd
+        path: continuous-deployment
+
+    - name: Detect cloud
+      id: cloud
+      uses: gitopsmanager/detect-cloud@main
+      with:
+        timeout-ms: 800
 
 
-    - name: Load environment config
+    - name: Warn if GitHub-hosted (unknown cloud)
+      if: ${{ steps.cloud.outputs.provider == 'unknown' }}
+      run: |
+        echo "⚠️ Running on a GitHub-hosted runner."
+        echo "Workload Identity mappings for AWS/Azure self-hosted runners will not apply."
+
+    - name: Import ENV_MAP from runner
+      shell: bash
+      run: |
+        printf "ENV_MAP<<EOF\n%s\nEOF\n" "$ENV_MAP" >> $GITHUB_ENV
+
+
+
+    # Strict env_map parsing + cluster selection (with ENV_MAP fallback)
+    - name: Load environment config (JSON)
       id: env
+      uses: actions/github-script@v7
+      env:
+        INLINE_ENV_MAP: ${{ inputs.env_map }}   # workflow input (preferred)
+        ENV_MAP: ${{ env.ENV_MAP }}            # fallback env var (e.g., injected from ConfigMap on self-hosted)
+        ENVIRONMENT: ${{ inputs.target }}
+        CLUSTER_IN: ${{ inputs.target_cluster }}
+        NAMESPACE: ${{ inputs.namespace }}
+      with:
+        script: |
+          const sourceInput = (process.env.INLINE_ENV_MAP || '').trim();
+          const sourceEnv   = (process.env.ENV_MAP || '').trim();
+          const raw = sourceInput || sourceEnv;
+
+          if (!raw) {
+            core.setFailed('❌ No env_map provided. Pass inputs.env_map OR set ENV_MAP environment variable.');
+            return;
+          }
+          core.info(`Using env_map from ${sourceInput ? 'workflow input (inputs.env_map)' : 'ENV_MAP environment variable'}.`);
+
+          let map;
+          try { map = JSON.parse(raw); }
+          catch (err) { core.setFailed(`❌ env_map is not valid JSON: ${err.message}`); return; }
+
+          const envName   = process.env.ENVIRONMENT;
+          const clusterIn = (process.env.CLUSTER_IN || '').trim();
+
+          if (!Object.prototype.hasOwnProperty.call(map, envName)) {
+            core.setFailed(`❌ Environment '${envName}' not found. Available: ${Object.keys(map).join(', ')}`);
+            return;
+          }
+
+          let selected;
+          if (clusterIn) {
+            // Search ALL clusters across all environments
+            const allClusters = Object.entries(map)
+              .flatMap(([env, val]) => (val.clusters || []).map(c => ({ ...c, __env: env })));
+
+            selected = allClusters.find(c => String(c.cluster).toLowerCase() === clusterIn.toLowerCase());
+            if (!selected) {
+              const available = allClusters.map(c => `${c.cluster} (env=${c.__env})`);
+              core.setFailed(`❌ target_cluster '${clusterIn}' not found. Available: ${available.join(', ')}`);
+              return;
+            }
+            core.info(`Cluster override: using cluster '${selected.cluster}' from env '${selected.__env}'`);
+          } else {
+            // Fallback: normal target-based selection
+            const entry = map[envName];
+            if (!entry || typeof entry !== 'object' || !Array.isArray(entry.clusters)) {
+              core.setFailed(`❌ env_map['${envName}'] must be { cluster_count, clusters: [...] }`);
+              return;
+            }
+            if (entry.clusters.length === 0) {
+              core.setFailed(`❌ env_map['${envName}'].clusters is empty`);
+              return;
+            }
+
+            if (entry.clusters.length > 1) {
+              const names = entry.clusters.map(c => c.cluster).filter(Boolean);
+              core.setFailed(`❌ '${envName}' has multiple clusters. Provide target_cluster. Options: ${names.join(', ')}`);
+              return;
+            }
+
+            selected = entry.clusters[0];
+            core.info(`Selected single cluster '${selected.cluster}' from env '${envName}'`);
+          }
+
+          const cluster   = String(selected.cluster);
+          const dnsZone   = String(selected.dns_zone || '');
+          const registry  = String(selected.container_registry || '');
+          const uami      = Array.isArray(selected.uami_map) ? selected.uami_map : [];
+
+          if (!cluster) { core.setFailed('❌ Selected cluster name is empty'); return; }
+          if (!dnsZone) { core.setFailed(`❌ Cluster '${cluster}' is missing dns_zone`); return; }
+
+          core.setOutput('cluster', cluster);
+          core.setOutput('dns_zone', dnsZone);
+          core.setOutput('container_registry', registry);
+          core.setOutput('uami_map', JSON.stringify(uami));
+          core.setOutput('namespace', process.env.NAMESPACE);
+
+
+    - name: Export CD_ROOT
+      id: cdroot
       run: |
-        ENV="${{ inputs.environment }}"
-        CONFIG="cd/config/env-map.yaml"
+        CD_ROOT="continuous-deployment/${{ steps.env.outputs.cluster }}/${{ inputs.namespace }}"
+        echo "CD_ROOT=$CD_ROOT" >> "$GITHUB_ENV"
+        echo "cd_root=$CD_ROOT" >> "$GITHUB_OUTPUT"
 
-        CLUSTER=$(yq ".[\"${ENV}\"].cluster" "$CONFIG")
-        DNS_ZONE=$(yq ".[\"${ENV}\"].dns_zone" "$CONFIG")
-        NAMESPACE="${{ inputs.namespace }}"
+    - name: Export UAMI env vars (uami_name => client_id)
+      id: uami
+      uses: actions/github-script@v7
+      env:
+        UAMI_JSON: ${{ steps.env.outputs.uami_map }}
+        CLUSTER: ${{ steps.env.outputs.cluster }}
+      with:
+        script: |
+          const clusterName = (process.env.CLUSTER || '').trim();
+
+          let arr = [];
+          try { arr = JSON.parse(process.env.UAMI_JSON || '[]'); }
+          catch { core.setFailed('❌ Selected cluster uami_map is not valid JSON'); return; }
+
+          if (!Array.isArray(arr) || arr.length === 0) {
+            core.info('No UAMI entries for selected cluster.');
+            core.setOutput("uami_vars", "{}");
+            return;
+          }
+
+          const seen = new Set();
+          const exported = {};
+
+          for (const [i, u] of arr.entries()) {
+            let name = String(u.uami_name || '').trim();
+            const rg   = String(u.uami_resource_group || '').trim();
+            const cid  = String(u.client_id || '').trim();
+
+            if (!name || !cid) {
+              core.warning(`Skipping UAMI index ${i}: missing uami_name or client_id.`);
+              continue;
+            }
+
+            // Remove "<clusterName>-" prefix if present
+            const prefix = clusterName + "-";
+            if (name.toLowerCase().startsWith(prefix.toLowerCase())) {
+              name = name.substring(prefix.length);
+            }
+
+            // Replace '-' with '_'
+            let varName = name.replace(/-/g, "_");
+
+            // Ensure valid shell identifier
+            if (!/^[A-Za-z_]/.test(varName)) varName = `_${varName}`;
+
+            if (seen.has(varName)) {
+              core.warning(`Duplicate UAMI var '${varName}' (rg='${rg}'). Skipping duplicate.`);
+              continue;
+            }
+
+            exported[varName.toLowerCase()] = cid;
+            seen.add(varName);
+          }
+
+          core.info("UAMI vars exported:");
+          core.info(JSON.stringify(exported, null, 2));
+
+          // Set JSON object as step output
+          core.setOutput("uami_vars", JSON.stringify(exported));
 
 
-        echo "cluster=$CLUSTER" >> "$GITHUB_OUTPUT"
-        echo "dns_zone=$DNS_ZONE" >> "$GITHUB_OUTPUT"
-        echo "namespace=$NAMESPACE" >> "$GITHUB_OUTPUT"
 
-    - name: Export CD_PATH
-      id: cdpath
+
+    # Unify to a single apps[] list for either mode
+    - name: Resolve apps (single or multi)
+      id: apps
+      uses: actions/github-script@v7
+      env:
+        APP_DETAILS: ${{ inputs.application_details }}
+        APPLICATION: ${{ inputs.application }}
+        DEPLOY_PATH: ${{ inputs.deploy_path }}
+        IMG_ONE: ${{ inputs.image_base_name }}
+        IMG_LIST: ${{ inputs.image_base_names }}
+      with:
+        script: |
+          const detailsRaw = (process.env.APP_DETAILS || '').trim();
+          let apps = [];
+          if (detailsRaw) {
+            let arr;
+            try { arr = JSON.parse(detailsRaw); }
+            catch(e){ core.setFailed(`❌ application_details is not valid JSON: ${e.message}`); return; }
+            if (!Array.isArray(arr)) { core.setFailed('❌ application_details must be a JSON array'); return; }
+            for (let i=0;i<arr.length;i++){
+              const it = arr[i] || {};
+              const name = String(it.name || '').trim();
+              const path = String(it.path || '').trim();
+              const images = Array.isArray(it.images) ? it.images.map(String) : [];
+              if (!name) { core.setFailed(`❌ application_details[${i}].name is required`); return; }
+              if (!path) { core.setFailed(`❌ application_details[${i}].path is required`); return; }
+              apps.push({ name, path, images });
+            }
+          } else {
+            // Single app mode
+            const name = (process.env.APPLICATION || '').trim();
+            const path = (process.env.DEPLOY_PATH || '').trim();
+            const images = [];
+            if ((process.env.IMG_ONE || '').trim()) images.push(process.env.IMG_ONE.trim());
+            if ((process.env.IMG_LIST || '').trim()) {
+              for (const s of process.env.IMG_LIST.split(',').map(x => x.trim()).filter(Boolean)) images.push(s);
+            }
+            if (!name) { core.setFailed('❌ application is required when application_details is not provided'); return; }
+            if (!path) { core.setFailed('❌ deploy_path is required when application_details is not provided'); return; }
+            apps.push({ name, path, images });
+          }
+          core.setOutput('apps', JSON.stringify(apps));
+          core.setOutput('count', String(apps.length));
+
+
+    - name: Download Nunjucks UMD bundle
       run: |
-        CD_PATH="continuous-deployment/${{ steps.env.outputs.cluster }}/${{ inputs.namespace }}/${{ inputs.application }}"
-        echo "CD_PATH=$CD_PATH" >> "$GITHUB_ENV"
-        echo "cd_path=$CD_PATH" >> "$GITHUB_OUTPUT"
-
-    - name: Template manifest files with envsubst
-      run: |
-        export CLUSTER_NAME="${{ steps.env.outputs.cluster }}"
-        export DNS_ZONE="${{ steps.env.outputs.dns_zone }}"
-        export NAMESPACE="${{ inputs.namespace }}"
-        export APPLICATION="${{ inputs.application }}"
-
-        find source/${{ inputs.repo_path }} \( -name '*.yaml' -o -name '*.yml' -o -name '*.json' \) -type f -print0 |
-          while IFS= read -r -d '' file; do
-            if grep -q '\${' "$file"; then
-              echo "Templating $file"
-              envsubst < "$file" > "$file.tmp" && mv "$file.tmp" "$file"
-            fi
-          done
+        curl -sSL https://cdnjs.cloudflare.com/ajax/libs/nunjucks/3.2.4/nunjucks.min.js -o nunjucks.js
 
 
+    - name: Render manifests with Nunjucks (Jinja2-style)
+      id: render
+      uses: actions/github-script@v7
+      env:
+        APPS: ${{ steps.apps.outputs.apps }}
+        CLUSTER_NAME: ${{ steps.env.outputs.cluster }}
+        DNS_ZONE: ${{ steps.env.outputs.dns_zone }}
+        NAMESPACE: ${{ inputs.namespace }}
+        APPLICATION_DEFAULT: ${{ inputs.application }}
+        CONTAINER_REGISTRY: ${{ steps.env.outputs.container_registry }}
+        UAMI_VARS: ${{ steps.uami.outputs.uami_vars }}   # 👈 exported JSON object from export step
+      with:
+        script: |
+          const fs = require('fs');
+          const path = require('path');
+          const nunjucks = require('./nunjucks.js');
 
-  
+          const apps = JSON.parse(process.env.APPS || '[]');
+          let dirs = [];
 
-    - name: Copy templated files to CD_PATH
-      run: |
-        TARGET="cd/${{ env.CD_PATH }}/${{ inputs.repo_path }}"
-        mkdir -p "$TARGET"
-        rm -rf "$TARGET"/*
-        cp -r source/${{ inputs.repo_path }}/* "$TARGET/"
+          // Base vars
+          const vars = {
+            CLUSTER_NAME: process.env.CLUSTER_NAME,
+            DNS_ZONE: process.env.DNS_ZONE,
+            NAMESPACE: process.env.NAMESPACE,
+            APPLICATION: process.env.APPLICATION_DEFAULT,
+            CONTAINER_REGISTRY: process.env.CONTAINER_REGISTRY,
+          };
 
+          // Merge in UAMI vars (client IDs keyed by uami_name)
+          try {
+            const uamiVars = JSON.parse(process.env.UAMI_VARS || '{}');
+            Object.assign(vars, uamiVars);
+            core.info(`Injected UAMI vars: ${Object.keys(uamiVars).join(', ')}`);
+          } catch (err) {
+            core.warning(`Could not parse UAMI_VARS: ${err.message}`);
+          }
+
+          nunjucks.configure({ autoescape: false });
+
+          for (const app of apps) {
+            const srcDir = path.join('source', app.path);
+            dirs.push(srcDir);
+
+            const files = fs.existsSync(srcDir)
+              ? fs.readdirSync(srcDir, { withFileTypes: true }).map(e => path.join(srcDir, e.name))
+              : [];
+
+            for (const f of files) {
+              if (/\.(ya?ml|json)$/i.test(f)) {
+                const template = fs.readFileSync(f, 'utf8');
+                const rendered = nunjucks.renderString(template, vars);
+                fs.writeFileSync(f, rendered, 'utf8');
+                console.log(`Rendered ${f}`);
+              }
+            }
+          }
+
+          return dirs.join("\n");
+
+
+    - name: Copy manifests to CD repo
+      id: copy
+      uses: actions/github-script@v7
+      env:
+        CLUSTER_NAME: ${{ steps.env.outputs.cluster }}
+        NAMESPACE: ${{ inputs.namespace }}
+        RENDERED_DIRS: ${{ steps.render.outputs.result }}
+        APPS: ${{ steps.apps.outputs.apps }}
+      with:
+        script: |
+          const fs = require('fs');
+          const path = require('path');
+          const { execSync } = require('child_process');
+
+          const cluster = process.env.CLUSTER_NAME;
+          const namespace = process.env.NAMESPACE;
+          const renderedDirs = (process.env.RENDERED_DIRS || '').trim().split('\n').filter(Boolean);
+          const apps = JSON.parse(process.env.APPS || '[]');
+
+          // ✅ Copy into the continuous-deployment repo
+          const cdRoot = path.join('continuous-deployment', cluster, namespace);
+          const cdRootRel = path.join(cluster, namespace);
+          fs.mkdirSync(cdRoot, { recursive: true });
+
+          // assume apps[] order matches renderedDirs[] order
+          renderedDirs.forEach((dir, i) => {
+            const app = apps[i];
+            if (!app) return;
+
+            const destDir = path.join(cdRoot, app.name);
+
+            // Delete just the app’s directory first
+            if (fs.existsSync(destDir)) {
+              console.log(`Removing old directory for app ${app.name}: ${destDir}`);
+              execSync(`rm -rf "${destDir}"`);
+            }
+
+            fs.mkdirSync(destDir, { recursive: true });
+            console.log(`Copying ${dir} -> ${destDir}`);
+            execSync(`cp -r "${dir}/." "${destDir}/"`, { stdio: 'inherit' });
+          });
+
+          core.setOutput('cd_path', cdRoot);
+          core.setOutput('cd_path_rel', cdRootRel);
+
+
+
+    - name: Upload CD repo manifests
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: templated-source-manifests-${{ steps.env.outputs.cluster }}
+        path: ${{ steps.copy.outputs.cd_path }}
 
     - name: Debug structure
       if: ${{ inputs.debug }}
-      run: |
-        echo "Debug mode enabled. Showing contents of CD_PATH:"
-        find cd/${{ env.CD_PATH }} || echo "Nothing copied!"
-
+      run: find "${{ steps.copy.outputs.cd_path }}" || echo "Nothing copied!"
 
     - name: Setup Kustomize
       uses: imranismail/setup-kustomize@v2
       with:
         kustomize-version: ${{ inputs.kustomize_version }}
 
-    - name: Patch image tag(s) if provided
+    - name: Patch image tag(s) (per app)
       if: ${{ inputs.image_tag != '' }}
-      run: |
-        cd cd/${{ env.CD_PATH }}/${{ inputs.repo_path }}/overlays/${{ inputs.overlay_dir }}
-        echo "Setting image tag to ${{ inputs.image_tag }}"
+      uses: actions/github-script@v7
+      env:
+        APPS: ${{ steps.apps.outputs.apps }}
+        CD_PATH: ${{ steps.copy.outputs.cd_path }}
+        IMAGE_TAG: ${{ inputs.image_tag }}
+        OVERLAY_DIR: ${{ inputs.overlay_dir }}
+        CONTAINER_REGISTRY: ${{ steps.env.outputs.container_registry }}
+      with:
+        script: |
+          const { execSync } = require('child_process');
+          const apps = JSON.parse(process.env.APPS || '[]');
+          const overlayDir = (process.env.OVERLAY_DIR || '').trim();
+          const registry = process.env.CONTAINER_REGISTRY.replace(/\/+$/, ''); // strip trailing slash if any
 
-        if [ -n "${{ inputs.image_base_name }}" ]; then
-          echo "Using image_base_name: ${{ inputs.image_base_name }}"
-          kustomize edit set image "${{ inputs.image_base_name }}=*:${{ inputs.image_tag }}"
-        fi
+          for (const app of apps) {
+            // Normalized layout: just app.name (+ overlays if defined)
+            const base = overlayDir
+              ? `${process.env.CD_PATH}/${app.name}/overlays/${overlayDir}`
+              : `${process.env.CD_PATH}/${app.name}`;
 
-        if [ -n "${{ inputs.image_base_names }}" ]; then
-          IFS=',' read -ra IMAGE_NAMES <<< "${{ inputs.image_base_names }}"
-          for name in "${IMAGE_NAMES[@]}"; do
-            echo "Setting image tag for $name"
-            kustomize edit set image "$name=*:${{ inputs.image_tag }}"
-          done
-        fi
+            if ((app.images || []).length === 0) continue;
+
+            for (const img of app.images) {
+              // full replacement: <registry>/<image>:<tag>
+              const newImage = `${registry}/${img}:${process.env.IMAGE_TAG}`;
+              execSync(
+                `bash -lc 'cd "${base}" && kustomize edit set image "${img}=${newImage}"'`,
+                { stdio: 'inherit' }
+              );
+            }
+          }
 
 
 
-
-    - name: Run kustomize build
+    - name: Run kustomize build (concat per app)
       id: kustomize
-      run: |
-        cd cd/${{ env.CD_PATH }}/${{ inputs.repo_path }}/overlays/${{ inputs.overlay_dir }}
-        kustomize build . > ../../../build-output.yaml
-        cp ../../../build-output.yaml $GITHUB_WORKSPACE/
+      uses: actions/github-script@v7
+      env:
+        APPS: ${{ steps.apps.outputs.apps }}
+        CD_PATH: ${{ steps.copy.outputs.cd_path }}
+        OVERLAY_DIR: ${{ inputs.overlay_dir }}
+      with:
+        script: |
+          const { execSync } = require('child_process');
+          const fs = require('fs');
+          const apps = JSON.parse(process.env.APPS || '[]');
+          const overlayDir = (process.env.OVERLAY_DIR || '').trim();
+          const outFile = `${process.env.GITHUB_WORKSPACE}/build-output.yaml`;
+
+          fs.writeFileSync(outFile, '');
+          let first = true;
+
+          for (const app of apps) {
+            const dir = overlayDir
+              ? `${process.env.CD_PATH}/${app.name}/overlays/${overlayDir}`
+              : `${process.env.CD_PATH}/${app.name}`;
+
+            const yaml = execSync(`bash -lc 'cd "${dir}" && kustomize build .'`, { encoding: 'utf8' });
+            fs.appendFileSync(outFile, (first ? '' : '\n---\n') + yaml);
+            first = false;
+          }
+
+          return outFile;
+
 
     - name: Upload built manifest as artifact
+      if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: built-kustomize-manifest
+        name: built-kustomize-manifest-${{ steps.env.outputs.cluster }}
         path: build-output.yaml
 
-    - name: Upload templated source manifests as artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: templated-source-manifests
-        path: source/${{ inputs.repo_path }}
-
     - name: Commit and push to continuous-deployment repo
+      run: |
+        set -euo pipefail
+
+        git -C continuous-deployment config user.name "k8s-deploy"
+        git -C continuous-deployment config user.email "actions@gitopsmanager.com"
+
+        echo "Adding files from: ${{ steps.copy.outputs.cd_path_rel }}/"
+        git -C continuous-deployment ls -la "${{ steps.copy.outputs.cd_path_rel }}/" || echo "⚠️ Directory not found"
+
+        echo "Before staging:"
+        git -C continuous-deployment status --short
+
+        git -C continuous-deployment add -A "${{ steps.copy.outputs.cd_path_rel }}/"
+
+        echo "After staging:"
+        git -C continuous-deployment status --short
+        git -C continuous-deployment diff --cached --stat || true
+
+        if git -C continuous-deployment diff --cached --quiet; then
+          echo "✅ No changes to commit."
+          exit 0
+        fi
+
+        git -C continuous-deployment commit -m "Deploy to ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} (apps: ${{ steps.apps.outputs.count }})"
+        git -C continuous-deployment push
+
+
+
+
+    - name: Resolve ArgoCD auth
+      id: resolve_auth
       env:
-        GH_TOKEN: ${{ steps.app-auth.outputs.token }}
+        IN_TOKEN: ${{ inputs.argocd_auth_token }}
+        IN_USER: ${{ inputs.argocd_username }}
+        IN_PASS: ${{ inputs.argocd_password }}
+        SEC_USER: ${{ secrets.ARGOCD_USERNAME }}
+        SEC_PASS: ${{ secrets.ARGOCD_PASSWORD }}
       run: |
-        cd cd
-        git config user.name "GitHub Actions"
-        git config user.email "actions@github.com"
-        git add "${{ env.CD_PATH }}//${{ inputs.repo_path }}/"
-        git diff --cached --quiet && echo "No changes to commit" && exit 0
-        git commit -m "Deploy ${{ inputs.application }} to ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }}"
-        git push
-
-    - name: Set ArgoCD variables
-      id: argocd_vars
-      run: |
-        CLUSTER="${{ steps.env.outputs.cluster }}"
-        NAMESPACE="${{ inputs.namespace }}"
-        DNS_ZONE="${{ steps.env.outputs.dns_zone }}"
-        APP_NAME="${NAMESPACE}-${{ inputs.application }}"
-        ARGOCD_URL="https://${CLUSTER}-argocd-argocd-web-ui.${DNS_ZONE}"
-        SYNC_URL="${ARGOCD_URL}/api/v1/applications/${APP_NAME}/sync"
-        STATUS_URL="${ARGOCD_URL}/api/v1/applications/${APP_NAME}"
-
-        # Get ArgoCD session token
-        TOKEN=$(curl -k -s -X POST "$ARGOCD_URL/api/v1/session" \
-          -H "Content-Type: application/json" \
-          -d "{\"username\":\"${{ secrets.ARGO_CD_ADMIN_USER }}\",\"password\":\"${{ secrets.ARGO_CD_ADMIN_PASSWORD }}\"}" | jq -r .token)
-
-        if [[ "$TOKEN" == "null" || -z "$TOKEN" ]]; then
-          echo "❌ Failed to get ArgoCD session token."
-          exit 1
-        fi
-
-        echo "cluster=$CLUSTER" >> "$GITHUB_OUTPUT"
-        echo "namespace=$NAMESPACE" >> "$GITHUB_OUTPUT"
-        echo "dns_zone=$DNS_ZONE" >> "$GITHUB_OUTPUT"
-        echo "app_name=$APP_NAME" >> "$GITHUB_OUTPUT"
-        echo "argocd_url=$ARGOCD_URL" >> "$GITHUB_OUTPUT"
-        echo "sync_url=$SYNC_URL" >> "$GITHUB_OUTPUT"
-        echo "status_url=$STATUS_URL" >> "$GITHUB_OUTPUT"
-        echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
-
-
-    - name: Check or create ArgoCD application
-      id: ensure_app
-      run: |
-        APP_NAME="${{ steps.argocd_vars.outputs.app_name }}"
-        ARGOCD_URL="${{ steps.argocd_vars.outputs.argocd_url }}"
-        STATUS_URL="${{ steps.argocd_vars.outputs.status_url }}"
-        CD_REPO="${{ inputs.cd_repo }}"
-        CD_PATH="${{ env.CD_PATH }}/${{ inputs.repo_path }}/overlays/${{ inputs.overlay_dir }}"
-        NAMESPACE="${{ inputs.namespace }}"
-        ARGOCD_TOKEN="${{ steps.argocd_vars.outputs.token }}"
-
-        # Determine curl SSL flags
-        CURL_SSL_FLAGS=""
-        if [[ "${{ inputs.insecure_argo }}" == "true" ]]; then
-          echo "⚠️ Insecure ArgoCD connection: TLS verification disabled"
-          CURL_SSL_FLAGS="-k"
-        elif [[ -n "${{ secrets.ARGOCD_CA_CERT }}" ]]; then
-          echo "🔒 Using provided CA certificate for ArgoCD TLS validation"
-          echo "${{ secrets.ARGOCD_CA_CERT }}" > /tmp/argocd-ca.crt
-          CURL_SSL_FLAGS="--cacert /tmp/argocd-ca.crt"
-        fi
-
-        echo "Checking if ArgoCD app $APP_NAME exists..."
-
-        HTTP_STATUS=$(curl $CURL_SSL_FLAGS -s -o /dev/null -w "%{http_code}" \
-          -H "Authorization: Bearer $ARGOCD_TOKEN" \
-          "$STATUS_URL")
-
-        echo "http_status=$HTTP_STATUS" >> "$GITHUB_OUTPUT"
-        echo "app_name=$APP_NAME" >> "$GITHUB_OUTPUT"
-
-        if [[ "$HTTP_STATUS" == "200" ]]; then
-          echo "✅ ArgoCD app $APP_NAME already exists."
-          exit 0
-        elif [[ "$HTTP_STATUS" == "403" ]]; then
-          echo "ℹ️ ArgoCD app $APP_NAME does not exist or is inaccessible — continuing to create it."
+        set -euo pipefail
+        if [ -n "${IN_TOKEN:-}" ]; then
+          echo "mode=token" >> "$GITHUB_OUTPUT"
+          echo "token=$IN_TOKEN" >> "$GITHUB_OUTPUT"
+        elif [ -n "${IN_USER:-}" ] && [ -n "${IN_PASS:-}" ]; then
+          echo "mode=basic" >> "$GITHUB_OUTPUT"
+          echo "username=$IN_USER" >> "$GITHUB_OUTPUT"
+          echo "password=$IN_PASS" >> "$GITHUB_OUTPUT"
+        elif [ -n "${SEC_USER:-}" ] && [ -n "${SEC_PASS:-}" ]; then
+          echo "mode=basic" >> "$GITHUB_OUTPUT"
+          echo "username=$SEC_USER" >> "$GITHUB_OUTPUT"
+          echo "password=$SEC_PASS" >> "$GITHUB_OUTPUT"
         else
-          echo "❌ Unexpected response from ArgoCD (HTTP $HTTP_STATUS)"
+          echo "❌ No ArgoCD auth provided."
           exit 1
         fi
 
-
-        echo "⚠️ App not found. Rendering and creating $APP_NAME in ArgoCD..."
-
-        export APP_NAME CD_REPO CD_PATH NAMESPACE
-
-        # Replace YAML with JSON template
-        envsubst < reusable/templates/argocd-application-template.json > rendered-app.json
-
-        echo "✅ Rendered ArgoCD app JSON:"
-        cat rendered-app.json
-
-        CREATE_RESPONSE=$(curl $CURL_SSL_FLAGS -s -w "%{http_code}" -o /tmp/argocd_create_resp.txt \
-          -X POST "$ARGOCD_URL/api/v1/applications" \
-          -H "Content-Type: application/json" \
-          -H "Authorization: Bearer $ARGOCD_TOKEN" \
-          --data-binary @rendered-app.json)
-
-
-        if [[ "$CREATE_RESPONSE" -ne 200 && "$CREATE_RESPONSE" -ne 201 ]]; then
-          echo "❌ Failed to create ArgoCD app. HTTP $CREATE_RESPONSE"
-          cat /tmp/argocd_create_resp.txt
-          exit 1
-        fi
-
-        echo "✅ ArgoCD app $APP_NAME successfully created."
-
-
-    - name: Sync ArgoCD app via REST API
-      id: argosync
+    - name: Debug ARGOCD_CA_CERT presence
       run: |
-        APP_NAME="${{ steps.argocd_vars.outputs.app_name }}"
-        ARGOCD_URL="${{ steps.argocd_vars.outputs.argocd_url }}"
-        STATUS_URL="${{ steps.argocd_vars.outputs.status_url }}"
-        SYNC_URL="${{ steps.argocd_vars.outputs.sync_url }}"
-        CD_REPO="${{ inputs.cd_repo }}"
-        CD_PATH="${{ env.CD_PATH }}/${{ inputs.repo_path }}/overlays/${{ inputs.overlay_dir }}"
-        NAMESPACE="${{ steps.argocd_vars.outputs.namespace }}"
-        ARGOCD_TOKEN="${{ steps.argocd_vars.outputs.token }}"
-
-        # Determine curl SSL flags
-        CURL_SSL_FLAGS=""
-        if [[ "${{ inputs.insecure_argo }}" == "true" ]]; then
-          echo "⚠️ Insecure ArgoCD connection: TLS verification disabled"
-          CURL_SSL_FLAGS="-k"
-        elif [[ -n "${{ secrets.ARGOCD_CA_CERT }}" ]]; then
-          echo "🔒 Using provided CA certificate for ArgoCD TLS validation"
-          echo "${{ secrets.ARGOCD_CA_CERT }}" > /tmp/argocd-ca.crt
-          CURL_SSL_FLAGS="--cacert /tmp/argocd-ca.crt"
+        if [ -z "${ARGOCD_CA_CERT}" ]; then
+          echo "❌ ARGOCD_CA_CERT is not set"
+        else
+          echo "✅ ARGOCD_CA_CERT is set (length: ${#ARGOCD_CA_CERT})"
+          echo "First line:"
+          echo "${ARGOCD_CA_CERT}" | head -n 1
         fi
-
-        echo "Syncing ArgoCD app $APP_NAME using $ARGOCD_URL..."
-
-        HTTP_RESPONSE=$(curl $CURL_SSL_FLAGS -s -w "%{http_code}" -o /tmp/curl_sync_response.txt \
-          -X POST "$SYNC_URL" \
-          -H "Content-Type: application/json" \
-          -H "Authorization: Bearer $ARGOCD_TOKEN" \
-          -d '{}')
-
-        if [ "$HTTP_RESPONSE" -ne 200 ] && [ "$HTTP_RESPONSE" -ne 201 ]; then
-          echo "❌ Failed to trigger sync. HTTP response code: $HTTP_RESPONSE"
-          cat /tmp/curl_sync_response.txt
-          exit 1
-        fi
-
-        echo "✅ Sync successfully triggered. ArgoCD accepted the sync request."
-
-        if [[ "${{ inputs.skip_status_check }}" == "true" ]]; then
-          echo "⏭️ Skipping ArgoCD sync status check. Assuming sync was accepted."
-          exit 0
-        fi
-
-        echo "⏳ Waiting for sync to complete..."
-        for i in {1..12}; do
-          STATUS=$(curl $CURL_SSL_FLAGS -s \
-            -H "Authorization: Bearer $ARGOCD_TOKEN" \
-            "$STATUS_URL" | jq -r '.status.sync.status')
-          echo "Current sync status: $STATUS"
-          if [ "$STATUS" = "Synced" ]; then
-            echo "✅ ArgoCD sync completed."
-            exit 0
-          fi
-          sleep 10
-        done
-
-        echo "❌ ArgoCD sync did not complete in time."
-        exit 1
+      shell: bash
+      env:
+        ARGOCD_CA_CERT: ${{ secrets.ARGOCD_CA_CERT }}
 
 
+    - name: Set ArgoCD connection (token & URLs)
+      id: argocd_conn
+      uses: actions/github-script@v7
+      env:
+        MODE: ${{ steps.resolve_auth.outputs.mode }}
+        TOKEN: ${{ steps.resolve_auth.outputs.token }}
+        USERNAME: ${{ steps.resolve_auth.outputs.username }}
+        PASSWORD: ${{ steps.resolve_auth.outputs.password }}
+        ARGOCD_CA_CERT: ${{ secrets.ARGOCD_CA_CERT }}
+        CLUSTER: ${{ steps.env.outputs.cluster }}
+        DNS_ZONE: ${{ steps.env.outputs.dns_zone }}
+        INSECURE_ARGO: ${{ inputs.insecure_argo }}
+      with:
+        script: |
+          const { execSync } = require('child_process');
+          const fs = require('fs');
+          const cluster = process.env.CLUSTER;
+          const dnsZone = process.env.DNS_ZONE;
+          const argocdUrl = `https://${cluster}-argocd-argocd-web-ui.${dnsZone}`;
+
+          // TLS flags for curl
+          let curlSslFlags = "";
+          if (String(process.env.INSECURE_ARGO) === "true") {
+            curlSslFlags = "-k";
+            core.warning("⚠️ Using insecure connection (curl -k).");
+          } else if (process.env.ARGOCD_CA_CERT) {
+            let cert = process.env.ARGOCD_CA_CERT;
+            if (cert.includes('\\n')) cert = cert.replace(/\\n/g, '\n');
+            fs.writeFileSync('/tmp/argocd-ca.crt', cert);
+            curlSslFlags = "--cacert /tmp/argocd-ca.crt";
+            core.info("✅ Using provided CA cert with curl.");
+          }
+
+          let finalToken = process.env.TOKEN;
+
+          if (process.env.MODE !== "token") {
+            const body = JSON.stringify({ username: process.env.USERNAME, password: process.env.PASSWORD });
+            const cmd = `curl -s ${curlSslFlags} -X POST "${argocdUrl}/api/v1/session" -H "Content-Type: application/json" -d '${body.replace(/'/g,"'\\''")}'`;
+            core.info(`🔐 Running: curl ... (hidden password)`);
+            const resp = execSync(cmd).toString();
+            try {
+              finalToken = JSON.parse(resp).token;
+            } catch {
+              core.error(`Response: ${resp}`);
+              core.setFailed("❌ Failed to parse ArgoCD session response");
+              return;
+            }
+          }
+
+          if (!finalToken) {
+            core.setFailed("❌ Failed to obtain ArgoCD token.");
+            return;
+          }
+
+          core.info("✅ Successfully obtained ArgoCD token.");
+          core.setOutput('argocd_url', argocdUrl);
+          core.setOutput('curl_ssl_flags', curlSslFlags);
+          core.setOutput('token', finalToken);
+
+    - name: Delete ArgoCD apps (per app)
+      if: ${{ inputs.delete_first }}
+      uses: actions/github-script@v7
+      env:
+        APPS: ${{ steps.apps.outputs.apps }}
+        ARGOCD_URL: ${{ steps.argocd_conn.outputs.argocd_url }}
+        ARGOCD_TOKEN: ${{ steps.argocd_conn.outputs.token }}
+        CURL_SSL_FLAGS: ${{ steps.argocd_conn.outputs.curl_ssl_flags }}
+        NAMESPACE: ${{ inputs.namespace }}
+      with:
+        script: |
+          const { execSync } = require('child_process');
+          const apps = JSON.parse(process.env.APPS || '[]');
+
+          function httpCode(cmd) {
+            return parseInt(execSync(`${cmd} -o /dev/null -w "%{http_code}"`).toString().trim(), 10);
+          }
+
+          for (const app of apps) {
+            const appName = `${process.env.NAMESPACE}-${app.name}`;
+            const appUrl = `${process.env.ARGOCD_URL}/api/v1/applications/${appName}`;
+            core.info(`🗑️ Deleting ArgoCD Application: ${appName}`);
+
+            const delCmd = `curl -s ${process.env.CURL_SSL_FLAGS} -X DELETE "${appUrl}" -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" -H "Content-Type: application/json"`;
+            const code = httpCode(delCmd);
+            core.info(`Delete response HTTP ${code}`);
+
+            if (![200, 202, 204].includes(code)) {
+              core.setFailed(`❌ Failed to delete ${appName}: HTTP ${code}`);
+              return;
+            }
+
+            const timeout = Date.now() + 120000;
+            while (Date.now() < timeout) {
+              const checkCmd = `curl -s ${process.env.CURL_SSL_FLAGS} -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" "${appUrl}"`;
+              const checkCode = httpCode(checkCmd);
+              if (checkCode === 403) {
+                core.info(`✅ ${appName} deleted (HTTP 403)`);
+                break;
+              }
+              core.info(`⏳ Still deleting ${appName} (HTTP ${checkCode})...`);
+              await new Promise(r => setTimeout(r, 5000));
+            }
+          }
 
 
-          
+
+    - name: Check or create ArgoCD applications (per app)
+      uses: actions/github-script@v7
+      env:
+        APPS: ${{ steps.apps.outputs.apps }}
+        CD_PATH_REL: ${{ steps.copy.outputs.cd_path_rel }}
+        OVERLAY_DIR: ${{ inputs.overlay_dir }}
+        CD_REPO: ${{ inputs.cd_repo }}
+        CD_REPO_ORG: ${{ inputs.cd_repo_org }}
+        ARGOCD_URL: ${{ steps.argocd_conn.outputs.argocd_url }}
+        ARGOCD_TOKEN: ${{ steps.argocd_conn.outputs.token }}
+        CURL_SSL_FLAGS: ${{ steps.argocd_conn.outputs.curl_ssl_flags }}
+        NAMESPACE: ${{ inputs.namespace }}
+      with:
+        script: |
+          const { execSync } = require('child_process');
+          const fs = require('fs');
+          const path = require('path');
+          const nunjucks = require('./nunjucks.js');
+          const apps = JSON.parse(process.env.APPS || '[]');
+
+          function curlJson(url) {
+            return execSync(`curl -s ${process.env.CURL_SSL_FLAGS} -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" "${url}"`).toString();
+          }
+
+          function deleteApp(appUrl, appName) {
+            execSync(`curl -s -o /dev/null -w "%{http_code}" ${process.env.CURL_SSL_FLAGS} -X DELETE "${appUrl}" -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" -H "Content-Type: application/json"`);
+            const timeout = Date.now() + 120000;
+            while (Date.now() < timeout) {
+              const code = parseInt(execSync(`curl -s -o /dev/null -w "%{http_code}" ${process.env.CURL_SSL_FLAGS} -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" "${appUrl}"`).toString());
+              if (code === 403) return true;
+              new Promise(r => setTimeout(r, 5000));
+            }
+            return false;
+          }
+
+          for (const app of apps) {
+            const appName = `${process.env.NAMESPACE}-${app.name}`;
+            const statusUrl = `${process.env.ARGOCD_URL}/api/v1/applications/${appName}`;
+            const basePath = path.join(process.env.CD_PATH_REL, app.name, 'overlays', process.env.OVERLAY_DIR);
+
+            const status = curlJson(statusUrl);
+            if (status) {
+              try {
+                const existing = JSON.parse(status);
+                if (existing?.spec?.source?.path !== basePath) {
+                  core.warning(`⚠️ Path mismatch for ${appName}, recreating`);
+                  deleteApp(statusUrl, appName);
+                } else {
+                  core.info(`✅ Argo app ${appName} exists with correct path.`);
+                  continue;
+                }
+              } catch {
+                // treat as non-200
+              }
+            }
+
+            const template = fs.readFileSync('reusable/templates/argocd-app-template-v5.json', 'utf8');
+            const rendered = nunjucks.renderString(template, {
+              APP_NAME: appName,
+              NAMESPACE: process.env.NAMESPACE,
+              CD_REPO: process.env.CD_REPO,
+              CD_REPO_ORG: process.env.CD_REPO_ORG,
+              CD_PATH: basePath
+            });
+
+            execSync(`curl -s ${process.env.CURL_SSL_FLAGS} -X POST "${process.env.ARGOCD_URL}/api/v1/applications" -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" -H "Content-Type: application/json" -d '${rendered.replace(/'/g,"'\\''")}'`);
+            core.info(`✅ Created Argo app ${appName}`);
+          }
+
+    - name: Sync ArgoCD apps (per app)
+      id: sync
+      uses: actions/github-script@v7
+      env:
+        APPS: ${{ steps.apps.outputs.apps }}
+        ARGOCD_URL: ${{ steps.argocd_conn.outputs.argocd_url }}
+        ARGOCD_TOKEN: ${{ steps.argocd_conn.outputs.token }}
+        CURL_SSL_FLAGS: ${{ steps.argocd_conn.outputs.curl_ssl_flags }}
+        NAMESPACE: ${{ inputs.namespace }}
+      with:
+        script: |
+          const { execSync } = require('child_process');
+          const apps = JSON.parse(process.env.APPS || '[]');
+          const baselines = {};
+
+          for (const app of apps) {
+            const appName = `${process.env.NAMESPACE}-${app.name}`;
+            const statusUrl = `${process.env.ARGOCD_URL}/api/v1/applications/${appName}`;
+
+            let baseline = 0;
+            try {
+              const status = execSync(`curl -s ${process.env.CURL_SSL_FLAGS} -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" "${statusUrl}"`).toString();
+              const json = JSON.parse(status);
+              if (json?.status?.operationState?.startedAt) {
+                baseline = new Date(json.status.operationState.startedAt).getTime();
+              }
+            } catch {}
+            baselines[appName] = baseline;
+
+            execSync(`curl -s ${process.env.CURL_SSL_FLAGS} -X POST "${statusUrl}/sync" -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" -H "Content-Type: application/json" -d '{}'`);
+            core.info(`🚀 Sync triggered: ${appName}`);
+          }
+
+          core.setOutput('baselines', JSON.stringify(baselines));
+
+    - name: Wait for ArgoCD sync (per app)
+      if: ${{ inputs.skip_status_check == false }}
+      uses: actions/github-script@v7
+      env:
+        APPS: ${{ steps.apps.outputs.apps }}
+        ARGOCD_URL: ${{ steps.argocd_conn.outputs.argocd_url }}
+        ARGOCD_TOKEN: ${{ steps.argocd_conn.outputs.token }}
+        CURL_SSL_FLAGS: ${{ steps.argocd_conn.outputs.curl_ssl_flags }}
+        NAMESPACE: ${{ inputs.namespace }}
+        BASELINES: ${{ steps.sync.outputs.baselines }}
+      with:
+        script: |
+          const { execSync } = require('child_process');
+          const apps = JSON.parse(process.env.APPS || '[]');
+          const baselines = JSON.parse(process.env.BASELINES || '{}');
+
+          for (const app of apps) {
+            const appName = `${process.env.NAMESPACE}-${app.name}`;
+            const statusUrl = `${process.env.ARGOCD_URL}/api/v1/applications/${appName}`;
+            const baseline = baselines[appName] || 0;
+            core.info(`⏳ Waiting for sync of ${appName}, baseline=${baseline}`);
+
+            let ok = false;
+            let lastPhase, lastSync, lastHealth;
+            for (let i = 0; i < 18; i++) {
+              try {
+                const status = execSync(`curl -s ${process.env.CURL_SSL_FLAGS} -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" "${statusUrl}"`).toString();
+                const json = JSON.parse(status);
+                const op = json?.status?.operationState;
+                lastPhase = op?.phase;
+                lastSync = json?.status?.sync?.status;
+                lastHealth = json?.status?.health?.status;
+
+                if (lastPhase === 'Error' || lastSync === 'Error' || lastSync === 'Failed') {
+                  core.setFailed(`❌ Sync failed for ${appName} (phase=${lastPhase}, status=${lastSync})`);
+                  return;
+                }
+
+                if (op?.startedAt && new Date(op.startedAt).getTime() > baseline) {
+                  if (lastPhase === 'Succeeded' && lastSync === 'Synced') {
+                    if (lastHealth === 'Healthy') {
+                      core.info(`✅ ${appName} is Synced and Healthy.`);
+                    } else {
+                      core.warning(`⚠️ ${appName} Synced but health=${lastHealth}.`);
+                    }
+                    ok = true;
+                    break;
+                  }
+                }
+              } catch {}
+              await new Promise(r => setTimeout(r, 10000));
+            }
+
+            if (!ok) {
+              core.setFailed(`❌ Sync did not complete in time for ${appName} (last phase=${lastPhase}, sync=${lastSync}, health=${lastHealth})`);
+              return;
+            }
+          }
