@@ -45,6 +45,11 @@ on:
         description: "Delete the namespaced app first before deploying it."
         required: false
         type: boolean        
+      delete_only:
+        description: "Delete ArgoCD app(s) without redeploying"
+        required: false
+        type: boolean
+        default: false
       cd_repo:
         required: true
         type: string
@@ -152,6 +157,7 @@ jobs:
       cd_path: ${{ steps.cdroot.outputs.cd_root }}
     steps:
     - name: Checkout repo
+      if: ${{ inputs.delete_only == false }}
       uses: actions/checkout@v4
       with:
         fetch-depth: 1
@@ -172,6 +178,7 @@ jobs:
 
 
     - name: Checkout reusable workflow repo
+      if: ${{ inputs.delete_only == false }}
       uses: actions/checkout@v4
       with:
         repository: gitopsmanager/k8s-deploy
@@ -187,13 +194,14 @@ jobs:
 
     - name: Detect cloud
       id: cloud
+      if: ${{ inputs.delete_only == false }}
       uses: gitopsmanager/detect-cloud@v1
       with:
         timeout-ms: 800
 
 
     - name: Warn if GitHub-hosted (unknown cloud)
-      if: ${{ steps.cloud.outputs.provider == 'unknown' }}
+      if: ${{ steps.cloud.outputs.provider == 'unknown' && inputs.delete_only == false  }}
       run: |
         echo "⚠️ Running on a GitHub-hosted runner."
         echo "Workload Identity mappings for AWS/Azure self-hosted runners will not apply."
@@ -405,12 +413,14 @@ jobs:
 
 
     - name: Download Nunjucks UMD bundle
+      if: ${{ inputs.delete_only == false }}
       run: |
         curl -sSL https://cdnjs.cloudflare.com/ajax/libs/nunjucks/3.2.4/nunjucks.min.js -o nunjucks.js
 
 
     - name: Render manifests with Nunjucks (Jinja2-style)
       id: render
+      if: ${{ inputs.delete_only == false }}
       uses: actions/github-script@v7
       env:
         APPS: ${{ steps.apps.outputs.apps }}
@@ -472,6 +482,7 @@ jobs:
 
     - name: Copy manifests to CD repo
       id: copy
+      if: ${{ inputs.delete_only == false }}
       uses: actions/github-script@v7
       env:
         CLUSTER_NAME: ${{ steps.env.outputs.cluster }}
@@ -518,14 +529,14 @@ jobs:
 
 
     - name: Upload CD repo manifests
-      if: always()
+      if: ${{ always() && inputs.delete_only == false }}
       uses: actions/upload-artifact@v4
       with:
         name: templated-source-manifests-${{ steps.env.outputs.cluster }}
         path: ${{ steps.copy.outputs.cd_path }}
 
     - name: Debug structure
-      if: ${{ inputs.debug }}
+      if: ${{ inputs.debug && inputs.delete_only == false }}
       run: find "${{ steps.copy.outputs.cd_path }}" || echo "Nothing copied!"
 
     - name: Setup Kustomize
@@ -534,7 +545,7 @@ jobs:
         kustomize-version: ${{ inputs.kustomize_version }}
 
     - name: Patch image tag(s) (per app)
-      if: ${{ inputs.image_tag != '' }}
+      if: ${{ inputs.image_tag != '' && inputs.delete_only == false  }}
       uses: actions/github-script@v7
       env:
         APPS: ${{ steps.apps.outputs.apps }}
@@ -571,6 +582,7 @@ jobs:
 
     - name: Run kustomize build (concat per app)
       id: kustomize
+      if: ${{ inputs.delete_only == false }}
       uses: actions/github-script@v7
       env:
         APPS: ${{ steps.apps.outputs.apps }}
@@ -601,7 +613,7 @@ jobs:
 
 
     - name: Upload built manifest as artifact
-      if: always()
+      if: ${{ always() && inputs.delete_only == false }}
       uses: actions/upload-artifact@v4
       with:
         name: built-kustomize-manifest-${{ steps.env.outputs.cluster }}
@@ -736,7 +748,7 @@ jobs:
           core.setOutput('token', finalToken);
 
     - name: Delete ArgoCD apps (per app)
-      if: ${{ inputs.delete_first }}
+      if: ${{ inputs.delete_first || inputs.delete_only }}
       uses: actions/github-script@v7
       env:
         APPS: ${{ steps.apps.outputs.apps }}
@@ -784,6 +796,7 @@ jobs:
 
     - name: Check or create ArgoCD applications (per app)
       uses: actions/github-script@v7
+      if: ${{ inputs.delete_only == false }}
       env:
         APPS: ${{ steps.apps.outputs.apps }}
         CD_PATH_REL: ${{ steps.copy.outputs.cd_path_rel }}
@@ -853,6 +866,7 @@ jobs:
 
     - name: Sync ArgoCD apps (per app)
       id: sync
+      if: ${{ inputs.delete_only == false }}
       uses: actions/github-script@v7
       env:
         APPS: ${{ steps.apps.outputs.apps }}
@@ -887,7 +901,7 @@ jobs:
           core.setOutput('baselines', JSON.stringify(baselines));
 
     - name: Wait for ArgoCD sync (per app)
-      if: ${{ inputs.skip_status_check == false }}
+      if: ${{ inputs.skip_status_check == false && inputs.delete_only == false }}
       uses: actions/github-script@v7
       env:
         APPS: ${{ steps.apps.outputs.apps }}
