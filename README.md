@@ -175,6 +175,60 @@ env:
 
 ---
 
+### Delete-Only Mode
+
+| Name          | Required | Type     | Default | Description |
+|---------------|----------|----------|---------|-------------|
+| `delete_only` | ❌       | boolean  | `false` | If `true`, the workflow will **only delete ArgoCD apps** for the specified cluster/namespace and clean up their corresponding directories in the CD repo. |
+
+---
+
+#### How it works
+
+When `delete_only: true`:
+
+- **Runs**:
+  - Environment resolution (`env_map` / `target` / `target_cluster`)  
+  - Authentication (`argocd_auth_token` or username/password)  
+  - ArgoCD connection setup (`argocd_conn`)  
+  - ArgoCD app deletion (API calls)  
+  - Cleanup of app directories in the **CD repo** (`continuous-deployment/<cluster>/<namespace>/<app>`)  
+  - Commit & push of deletions to the CD repo  
+
+- **Skips**:
+  - Manifest templating with Nunjucks  
+  - Image patching  
+  - `kustomize build`  
+  - Uploading artifacts  
+  - Creating or syncing ArgoCD apps  
+
+This mode is useful for **cleanly tearing down apps** in both ArgoCD **and** your CD repo, leaving no trace of the app’s manifests.
+
+---
+
+#### Example Usage
+
+```yaml
+jobs:
+  delete:
+    uses: gitopsmanager/k8s-deploy/.github/workflows/deploy.yaml@v2
+    with:
+      github_runner: my-self-hosted
+      cd_repo: continuous-deployment
+      cd_repo_org: my-org
+      github_environment: prod
+      target: prod
+      target_cluster: aks-prod-weu
+      namespace: my-namespace
+      delete_only: true
+    secrets:
+      CONTINUOUS_DEPLOYMENT_GH_APP_ID: ${{ secrets.CD_GH_APP_ID }}
+      CONTINUOUS_DEPLOYMENT_GH_APP_PRIVATE_KEY: ${{ secrets.CD_GH_APP_KEY }}
+      ARGOCD_CA_CERT: ${{ secrets.ARGOCD_CA_CERT }}
+
+---
+
+
 ### ArgoCD / Misc
 | Name                | Required | Type    | Default  | Description |
 |---------------------|----------|---------|----------|-------------|
