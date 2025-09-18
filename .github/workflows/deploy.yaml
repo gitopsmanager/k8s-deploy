@@ -455,7 +455,7 @@ jobs:
         NAMESPACE: ${{ inputs.namespace }}
         APPLICATION_DEFAULT: ${{ inputs.application }}
         CONTAINER_REGISTRY: ${{ steps.env.outputs.container_registry }}
-        UAMI_VARS: ${{ steps.uami.outputs.uami_vars }}   # 👈 exported JSON object from export step
+        UAMI_VARS: ${{ steps.uami.outputs.uami_vars }}
       with:
         script: |
           const fs = require('fs');
@@ -463,6 +463,8 @@ jobs:
           const nunjucks = require('./nunjucks.js');
 
           const apps = JSON.parse(process.env.APPS || '[]');
+          core.info(`📝 Apps to render: ${apps.map(a => a.name).join(', ')}`);
+
           let dirs = [];
 
           // Base vars
@@ -472,44 +474,63 @@ jobs:
             zone_nm: process.env.DNS_ZONE,
             namespace: process.env.NAMESPACE,
           };
+          core.info(`🌍 Base vars: ${JSON.stringify(vars)}`);
 
           // Merge in UAMI vars (client IDs keyed by uami_name)
           try {
             const uamiVars = JSON.parse(process.env.UAMI_VARS || '{}');
             Object.assign(vars, uamiVars);
-            core.info(`Injected UAMI vars: ${Object.keys(uamiVars).join(', ')}`);
+            core.info(`🔑 Injected UAMI vars: ${Object.keys(uamiVars).join(', ')}`);
           } catch (err) {
-            core.warning(`Could not parse UAMI_VARS: ${err.message}`);
+            core.warning(`⚠️ Could not parse UAMI_VARS: ${err.message}`);
           }
 
           nunjucks.configure({ autoescape: false });
 
+          function listFiles(dir) {
+            return fs.readdirSync(dir, { withFileTypes: true })
+              .flatMap(e => {
+                const full = path.join(dir, e.name);
+                return e.isDirectory() ? listFiles(full) : [full];
+              });
+          }
+
           for (const app of apps) {
             const srcDir = path.join('source', app.path);
+            core.startGroup(`📂 Processing app=${app.name} path=${app.path} → srcDir=${srcDir}`);
             dirs.push(srcDir);
 
-            function listFiles(dir) {
-              return fs.readdirSync(dir, { withFileTypes: true })
-                .flatMap(e => {
-                  const full = path.join(dir, e.name);
-                  return e.isDirectory() ? listFiles(full) : [full];
-                });
+            if (!fs.existsSync(srcDir)) {
+              core.warning(`⚠️ Source dir not found for app '${app.name}' at ${srcDir}`);
+              core.endGroup();
+              continue;
             }
 
-            const files = fs.existsSync(srcDir) ? listFiles(srcDir) : [];
-
+            const files = listFiles(srcDir);
+            core.info(`Found ${files.length} files for app '${app.name}'`);
+            files.forEach(f => core.info("  - " + f));
 
             for (const f of files) {
               if (/\.(ya?ml|json)$/i.test(f)) {
                 const template = fs.readFileSync(f, 'utf8');
                 const rendered = nunjucks.renderString(template, vars);
                 fs.writeFileSync(f, rendered, 'utf8');
-                console.log(`Rendered ${f}`);
+
+                // Detect unresolved placeholders
+                if (rendered.includes("{{")) {
+                  core.warning(`⚠️ Unresolved placeholders remain in ${f}`);
+                }
+
+                core.info(`✅ Rendered ${f}`);
+              } else {
+                core.debug(`Skipping non-YAML/JSON file: ${f}`);
               }
             }
+            core.endGroup();
           }
 
           return dirs.join("\n");
+
 
 
     - name: Copy manifests to CD repo
