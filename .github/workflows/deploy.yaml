@@ -389,35 +389,53 @@ jobs:
         script: |
           const detailsRaw = (process.env.APP_DETAILS || '').trim();
           let apps = [];
+
           if (detailsRaw) {
             let arr;
             try { arr = JSON.parse(detailsRaw); }
-            catch(e){ core.setFailed(`❌ application_details is not valid JSON: ${e.message}`); return; }
-            if (!Array.isArray(arr)) { core.setFailed('❌ application_details must be a JSON array'); return; }
-            for (let i=0;i<arr.length;i++){
+            catch (e) { core.setFailed(`❌ application_details is not valid JSON: ${e.message}`); return; }
+
+            // Normalize to array if single object
+            if (!Array.isArray(arr)) {
+              core.info('application_details is a single object → wrapping in an array');
+              arr = [arr];
+            }
+
+            for (let i = 0; i < arr.length; i++) {
               const it = arr[i] || {};
               const name = String(it.name || '').trim();
               const path = String(it.path || '').trim();
               const images = Array.isArray(it.images) ? it.images.map(String) : [];
+
               if (!name) { core.setFailed(`❌ application_details[${i}].name is required`); return; }
               if (!path) { core.setFailed(`❌ application_details[${i}].path is required`); return; }
+
               apps.push({ name, path, images });
             }
           } else {
-            // Single app mode
+            // Single app mode (inputs)
             const name = (process.env.APPLICATION || '').trim();
             const path = (process.env.DEPLOY_PATH || '').trim();
             const images = [];
-            if ((process.env.IMG_ONE || '').trim()) images.push(process.env.IMG_ONE.trim());
-            if ((process.env.IMG_LIST || '').trim()) {
-              for (const s of process.env.IMG_LIST.split(',').map(x => x.trim()).filter(Boolean)) images.push(s);
+
+            if ((process.env.IMG_ONE || '').trim()) {
+              images.push(process.env.IMG_ONE.trim());
             }
+            if ((process.env.IMG_LIST || '').trim()) {
+              for (const s of process.env.IMG_LIST.split(',').map(x => x.trim()).filter(Boolean)) {
+                images.push(s);
+              }
+            }
+
             if (!name) { core.setFailed('❌ application is required when application_details is not provided'); return; }
             if (!path) { core.setFailed('❌ deploy_path is required when application_details is not provided'); return; }
+
             apps.push({ name, path, images });
           }
+
           core.setOutput('apps', JSON.stringify(apps));
           core.setOutput('count', String(apps.length));
+
 
 
     - name: Download Nunjucks UMD bundle
