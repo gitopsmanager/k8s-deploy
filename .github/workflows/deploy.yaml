@@ -1043,24 +1043,37 @@ jobs:
             const appName = `${process.env.NAMESPACE}-${app.name}`;
             const statusUrl = `${process.env.ARGOCD_URL}/api/v1/applications/${appName}`;
             const baseline = baselines[appName] || 0;
-            core.info(`⏳ Waiting for sync of ${appName}, baseline=${baseline}`);
+            core.startGroup(`⏳ Waiting for sync of ${appName}, baseline=${baseline}`);
 
             let ok = false;
             let lastPhase, lastSync, lastHealth;
+            let consecutiveErrors = 0;
+
             for (let i = 0; i < 18; i++) {
               try {
-                const status = execSync(`curl -s ${process.env.CURL_SSL_FLAGS} -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" "${statusUrl}"`).toString();
+                const status = execSync(
+                  `curl -s ${process.env.CURL_SSL_FLAGS} -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" "${statusUrl}"`
+                ).toString();
                 const json = JSON.parse(status);
+
                 const op = json?.status?.operationState;
                 lastPhase = op?.phase;
                 lastSync = json?.status?.sync?.status;
                 lastHealth = json?.status?.health?.status;
 
+                core.info(
+                  `🔄 Iteration ${i + 1}/18 for ${appName}: phase=${lastPhase}, sync=${lastSync}, health=${lastHealth}`
+                );
+
+                consecutiveErrors = 0; // reset if successful fetch
+
+                // Immediate fail conditions
                 if (lastPhase === 'Error' || lastSync === 'Error' || lastSync === 'Failed') {
-                  core.setFailed(`❌ Sync failed for ${appName} (phase=${lastPhase}, status=${lastSync})`);
+                  core.setFailed(`❌ Sync failed for ${appName} (phase=${lastPhase}, sync=${lastSync})`);
                   return;
                 }
 
+                // Success condition
                 if (op?.startedAt && new Date(op.startedAt).getTime() > baseline) {
                   if (lastPhase === 'Succeeded' && lastSync === 'Synced') {
                     if (lastHealth === 'Healthy') {
@@ -1072,14 +1085,29 @@ jobs:
                     break;
                   }
                 }
-              } catch {}
-              await new Promise(r => setTimeout(r, 10000));
-            }
+              } catch (err) {
+                consecutiveErrors++;
+                if (consecutiveErrors > 3) {
+                  core.setFailed(
+                    `❌ Failed to fetch status for ${appName} after ${consecutiveErrors} attempts: ${err.message}`
+                  );
+                  return;
+                } else {
+                  core.warning(
+                    `⚠️ Failed to fetch status for ${appName} (attempt ${consecutiveErrors}): ${err.message}`
+                  );
+                }
+              }
 
+              await new Promise((r) => setTimeout(r, 10000));
+            }
 
             if (!ok) {
-              core.warning(`⚠️ Sync did not complete in time for ${appName} (last phase=${lastPhase}, sync=${lastSync}, health=${lastHealth})`);
-              // keep going instead of failing
+              core.warning(
+                `⚠️ Sync did not complete in time for ${appName} (last phase=${lastPhase}, sync=${lastSync}, health=${lastHealth})`
+              );
             }
 
+            core.endGroup();
           }
+
