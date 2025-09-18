@@ -212,7 +212,6 @@ jobs:
         printf "ENV_MAP<<EOF\n%s\nEOF\n" "$ENV_MAP" >> $GITHUB_ENV
 
 
-
     # Strict env_map parsing + cluster selection (with ENV_MAP fallback)
     - name: Load environment config (JSON)
       id: env
@@ -239,17 +238,13 @@ jobs:
           try { map = JSON.parse(raw); }
           catch (err) { core.setFailed(`❌ env_map is not valid JSON: ${err.message}`); return; }
 
-          const envName   = process.env.ENVIRONMENT;
+          const envName   = (process.env.ENVIRONMENT || '').trim();
           const clusterIn = (process.env.CLUSTER_IN || '').trim();
 
-          if (!Object.prototype.hasOwnProperty.call(map, envName)) {
-            core.setFailed(`❌ Environment '${envName}' not found. Available: ${Object.keys(map).join(', ')}`);
-            return;
-          }
-
           let selected;
+
           if (clusterIn) {
-            // Search ALL clusters across all environments
+            // Cluster override: search ALL clusters across ALL environments
             const allClusters = Object.entries(map)
               .flatMap(([env, val]) => (val.clusters || []).map(c => ({ ...c, __env: env })));
 
@@ -259,9 +254,19 @@ jobs:
               core.setFailed(`❌ target_cluster '${clusterIn}' not found. Available: ${available.join(', ')}`);
               return;
             }
+
+            if (selected.__env !== envName) {
+              core.warning(`⚠️ target_cluster '${clusterIn}' belongs to env '${selected.__env}', not requested env '${envName}'. Proceeding anyway.`);
+            }
+
             core.info(`Cluster override: using cluster '${selected.cluster}' from env '${selected.__env}'`);
           } else {
-            // Fallback: normal target-based selection
+            // Normal environment-based selection
+            if (!Object.prototype.hasOwnProperty.call(map, envName)) {
+              core.setFailed(`❌ Environment '${envName}' not found. Available: ${Object.keys(map).join(', ')}`);
+              return;
+            }
+
             const entry = map[envName];
             if (!entry || typeof entry !== 'object' || !Array.isArray(entry.clusters)) {
               core.setFailed(`❌ env_map['${envName}'] must be { cluster_count, clusters: [...] }`);
@@ -271,7 +276,6 @@ jobs:
               core.setFailed(`❌ env_map['${envName}'].clusters is empty`);
               return;
             }
-
             if (entry.clusters.length > 1) {
               const names = entry.clusters.map(c => c.cluster).filter(Boolean);
               core.setFailed(`❌ '${envName}' has multiple clusters. Provide target_cluster. Options: ${names.join(', ')}`);
@@ -282,7 +286,8 @@ jobs:
             core.info(`Selected single cluster '${selected.cluster}' from env '${envName}'`);
           }
 
-          const cluster   = String(selected.cluster);
+          // Final validation + outputs
+          const cluster   = String(selected.cluster || '');
           const dnsZone   = String(selected.dns_zone || '');
           const registry  = String(selected.container_registry || '');
           const uami      = Array.isArray(selected.uami_map) ? selected.uami_map : [];
@@ -295,6 +300,8 @@ jobs:
           core.setOutput('container_registry', registry);
           core.setOutput('uami_map', JSON.stringify(uami));
           core.setOutput('namespace', process.env.NAMESPACE);
+
+
 
 
     - name: Export CD_ROOT
