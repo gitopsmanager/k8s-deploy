@@ -558,7 +558,7 @@ jobs:
       if: ${{ always() && inputs.delete_only == false }}
       uses: actions/upload-artifact@v4
       with:
-        name: templated-source-manifests-${{ steps.env.outputs.cluster }}
+        name: templated-source-manifests-${{ steps.env.outputs.cluster }}-${{ fromJSON(steps.apps.outputs.apps)[0].name }}
         path: ${{ steps.copy.outputs.cd_path }}
 
     - name: Debug structure
@@ -643,7 +643,7 @@ jobs:
       if: ${{ always() && inputs.delete_only == false }}
       uses: actions/upload-artifact@v4
       with:
-        name: built-kustomize-manifest-${{ steps.env.outputs.cluster }}
+        name: built-kustomize-manifest-${{ steps.env.outputs.cluster }}-${{ fromJSON(steps.apps.outputs.apps)[0].name }}
         path: build-output.yaml
 
     - name: Commit and push to continuous-deployment repo
