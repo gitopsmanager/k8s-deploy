@@ -469,6 +469,7 @@ jobs:
           const vars = {
             cluster_name: process.env.CLUSTER_NAME,
             dns_zone: process.env.DNS_ZONE,
+            zone_nm: process.env.DNS_ZONE,
             namespace: process.env.NAMESPACE,
           };
 
