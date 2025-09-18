@@ -633,28 +633,37 @@ jobs:
       run: |
         set -euo pipefail
 
-        git -C continuous-deployment config user.name "k8s-deploy"
-        git -C continuous-deployment config user.email "actions@gitopsmanager.com"
+        cd continuous-deployment
+
+        git config user.name "k8s-deploy"
+        git config user.email "actions@gitopsmanager.com"
 
         echo "Adding files from: ${{ steps.copy.outputs.cd_path_rel }}/"
-        git -C continuous-deployment ls -la "${{ steps.copy.outputs.cd_path_rel }}/" || echo "⚠️ Directory not found"
+        ls -la "${{ steps.copy.outputs.cd_path_rel }}/" || echo "⚠️ Directory not found"
 
         echo "Before staging:"
-        git -C continuous-deployment status --short
+        git status --short
 
-        git -C continuous-deployment add -A "${{ steps.copy.outputs.cd_path_rel }}/"
+        git add -A "${{ steps.copy.outputs.cd_path_rel }}/"
 
         echo "After staging:"
-        git -C continuous-deployment status --short
-        git -C continuous-deployment diff --cached --stat || true
+        git status --short
+        git diff --cached --stat || true
 
-        if git -C continuous-deployment diff --cached --quiet; then
+        if git diff --cached --quiet; then
           echo "✅ No changes to commit."
           exit 0
         fi
 
-        git -C continuous-deployment commit -m "Deploy to ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} (apps: ${{ steps.apps.outputs.count }})"
-        git -C continuous-deployment push
+        git commit -m "Deploy to ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} (apps: ${{ steps.apps.outputs.count }})"
+
+        # Push with retry-on-conflict
+        branch="$(git rev-parse --abbrev-ref HEAD)"
+        if ! git push origin "$branch"; then
+          echo "⚠️ Push failed, rebasing onto latest remote branch '$branch'..."
+          git pull --rebase origin "$branch"
+          git push origin "$branch"
+        fi
 
 
 
@@ -833,19 +842,30 @@ jobs:
       if: ${{ inputs.delete_only }}
       run: |
         set -euo pipefail
-        git -C continuous-deployment config user.name "k8s-deploy"
-        git -C continuous-deployment config user.email "actions@gitopsmanager.com"
+        cd continuous-deployment
+
+        git config user.name "k8s-deploy"
+        git config user.email "actions@gitopsmanager.com"
 
         echo "Staging deletions in: ${{ steps.cdroot.outputs.cd_root }}/"
-        git -C continuous-deployment rm -r "${{ steps.cdroot.outputs.cd_root }}/" || true
+        # rm will stage deletions, ignore if path doesn't exist
+        git rm -r "${{ steps.cdroot.outputs.cd_root }}/" 2>/dev/null || true
 
-        if git -C continuous-deployment diff --cached --quiet; then
+        if git diff --cached --quiet; then
           echo "✅ No deletions to commit."
           exit 0
         fi
 
-        git -C continuous-deployment commit -m "Delete apps in ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} (delete_only mode)"
-        git -C continuous-deployment push
+        git commit -m "Delete apps in ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} (delete_only mode)"
+
+        # Push with retry-on-conflict
+        branch="$(git rev-parse --abbrev-ref HEAD)"
+        if ! git push origin "$branch"; then
+          echo "⚠️ Push failed, rebasing onto latest remote branch '$branch'..."
+          git pull --rebase origin "$branch"
+          git push origin "$branch"
+        fi
+
 
 
 
