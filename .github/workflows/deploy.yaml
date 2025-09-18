@@ -1065,7 +1065,7 @@ jobs:
                   `🔄 Iteration ${i + 1}/18 for ${appName}: phase=${lastPhase}, sync=${lastSync}, health=${lastHealth}`
                 );
 
-                consecutiveErrors = 0; // reset if successful fetch
+                consecutiveErrors = 0; // reset error counter if fetch succeeded
 
                 // Immediate fail conditions
                 if (lastPhase === 'Error' || lastSync === 'Error' || lastSync === 'Failed') {
@@ -1073,16 +1073,19 @@ jobs:
                   return;
                 }
 
-                // Success condition
+                // Only check once operation has started after baseline
                 if (op?.startedAt && new Date(op.startedAt).getTime() > baseline) {
                   if (lastPhase === 'Succeeded' && lastSync === 'Synced') {
                     if (lastHealth === 'Healthy') {
                       core.info(`✅ ${appName} is Synced and Healthy.`);
+                      ok = true;
+                      break;
+                    } else if (lastHealth === 'Degraded') {
+                      core.setFailed(`❌ ${appName} is Synced but health=Degraded.`);
+                      return;
                     } else {
-                      core.warning(`⚠️ ${appName} Synced but health=${lastHealth}.`);
+                      core.info(`⏳ ${appName} is Synced but health=${lastHealth} → waiting for Healthy...`);
                     }
-                    ok = true;
-                    break;
                   }
                 }
               } catch (err) {
