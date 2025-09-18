@@ -488,9 +488,16 @@ jobs:
             const srcDir = path.join('source', app.path);
             dirs.push(srcDir);
 
-            const files = fs.existsSync(srcDir)
-              ? fs.readdirSync(srcDir, { withFileTypes: true }).map(e => path.join(srcDir, e.name))
-              : [];
+            function listFiles(dir) {
+              return fs.readdirSync(dir, { withFileTypes: true })
+                .flatMap(e => {
+                  const full = path.join(dir, e.name);
+                  return e.isDirectory() ? listFiles(full) : [full];
+                });
+            }
+
+            const files = fs.existsSync(srcDir) ? listFiles(srcDir) : [];
+
 
             for (const f of files) {
               if (/\.(ya?ml|json)$/i.test(f)) {
