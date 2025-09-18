@@ -586,7 +586,8 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: templated-source-manifests-${{ steps.env.outputs.cluster }}-${{ fromJSON(steps.apps.outputs.apps)[0].name }}
-        path: ${{ steps.copy.outputs.cd_path }}
+        path: ${{ steps.copy.outputs.cd_path }}/${{ fromJSON(steps.apps.outputs.apps)[0].name }}
+
 
     - name: Debug structure
       if: ${{ inputs.debug && inputs.delete_only == false }}
@@ -671,7 +672,8 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: built-kustomize-manifest-${{ steps.env.outputs.cluster }}-${{ fromJSON(steps.apps.outputs.apps)[0].name }}
-        path: build-output.yaml
+        path: build-output-${{ fromJSON(steps.apps.outputs.apps)[0].name }}.yaml
+
 
     - name: Commit and push to continuous-deployment repo
       if: ${{ inputs.delete_only == false }}
