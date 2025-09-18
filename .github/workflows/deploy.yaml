@@ -467,11 +467,9 @@ jobs:
 
           // Base vars
           const vars = {
-            CLUSTER_NAME: process.env.CLUSTER_NAME,
-            DNS_ZONE: process.env.DNS_ZONE,
-            NAMESPACE: process.env.NAMESPACE,
-            APPLICATION: process.env.APPLICATION_DEFAULT,
-            CONTAINER_REGISTRY: process.env.CONTAINER_REGISTRY,
+            cluster_name: process.env.CLUSTER_NAME,
+            dns_zone: process.env.DNS_ZONE,
+            namespace: process.env.NAMESPACE,
           };
 
           // Merge in UAMI vars (client IDs keyed by uami_name)
