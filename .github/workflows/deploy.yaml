@@ -704,13 +704,25 @@ jobs:
 
         git commit -m "Deploy to ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} (apps: ${{ steps.apps.outputs.count }})"
 
-        # Push with retry-on-conflict
         branch="$(git rev-parse --abbrev-ref HEAD)"
-        if ! git push origin "$branch"; then
-          echo "⚠️ Push failed, rebasing onto latest remote branch '$branch'..."
-          git pull --rebase origin "$branch"
-          git push origin "$branch"
-        fi
+
+        for i in 1 2 3 4 5; do
+          if git push origin "$branch"; then
+            echo "✅ Push succeeded"
+            break
+          fi
+
+          echo "⚠️ Push failed (attempt $i), rebasing onto latest remote branch '$branch'..."
+          git fetch origin "$branch"
+          git rebase origin/"$branch" || { echo "❌ Rebase failed"; exit 1; }
+
+          # On the 3rd attempt, fail explicitly
+          if [ "$i" -eq 3 ]; then
+            echo "❌ Push failed after 3 attempts"
+            exit 1
+          fi
+        done
+
 
 
 
@@ -905,13 +917,24 @@ jobs:
 
         git commit -m "Delete apps in ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} (delete_only mode)"
 
-        # Push with retry-on-conflict
         branch="$(git rev-parse --abbrev-ref HEAD)"
-        if ! git push origin "$branch"; then
-          echo "⚠️ Push failed, rebasing onto latest remote branch '$branch'..."
-          git pull --rebase origin "$branch"
-          git push origin "$branch"
-        fi
+
+        for i in 1 2 3 4 5; do
+          if git push origin "$branch"; then
+            echo "✅ Push succeeded"
+            break
+          fi
+
+          echo "⚠️ Push failed (attempt $i), rebasing onto latest remote branch '$branch'..."
+          git fetch origin "$branch"
+          git rebase origin/"$branch" || { echo "❌ Rebase failed"; exit 1; }
+
+          # On the 3rd attempt, fail explicitly
+          if [ "$i" -eq 3 ]; then
+            echo "❌ Push failed after 3 attempts"
+            exit 1
+          fi
+        done
 
 
 
