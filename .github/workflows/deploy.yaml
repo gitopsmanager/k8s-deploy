@@ -12,7 +12,7 @@ on:
       namespace:
         required: true
         type: string
-      target:
+      target_environment:
         description: >
           The environment to deploy to (e.g., `dev`, `qa`, `prod`).
 
@@ -25,7 +25,7 @@ on:
       # REQUIRED when env has >1 clusters
       target_cluster:
         description: >
-          The specific cluster to deploy to when the selected `target` environment
+          The specific cluster to deploy to when the selected target_environment
           has more than one cluster in `env_map`.
 
           - For single-cluster environments (like `dev`, `qa`), leave this empty.
@@ -219,7 +219,7 @@ jobs:
       env:
         INLINE_ENV_MAP: ${{ inputs.env_map }}   # workflow input (preferred)
         ENV_MAP: ${{ env.ENV_MAP }}            # fallback env var (e.g., injected from ConfigMap on self-hosted)
-        ENVIRONMENT: ${{ inputs.target }}
+        ENVIRONMENT: ${{ inputs.target_environment }}
         CLUSTER_IN: ${{ inputs.target_cluster }}
         NAMESPACE: ${{ inputs.namespace }}
       with:

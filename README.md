@@ -17,8 +17,8 @@ It renders manifest files using **Jinja2-style templating implemented with [Nunj
 |----------------------|----------|----------|---------|-------------|
 | `github_runner`      | ✅       | string   | –       | Label of the self-hosted runner (must have cluster access) |
 | `namespace`          | ✅       | string   | –       | Kubernetes namespace for deployment |
-| `target`             | ✅       | string   | `dev`   | Logical environment (`dev`, `qa`, `prod`). Still required even if `target_cluster` is set, as it controls approvals and environment scoping. |
-| `target_cluster`     | ❌       | string   | `""`    | If set, resolves the cluster **globally across all `env_map` environments** by matching the `cluster` name. If omitted, the cluster is resolved from the given `target` environment only. |
+| `target_environment` | ✅       | string   | `dev`   | Logical environment (`dev`, `qa`, `prod`). Still required even if `target_cluster` is set, as it controls approvals and environment scoping. |
+| `target_cluster`     | ❌       | string   | `""`    | If set, resolves the cluster **globally across all `env_map` environments** by matching the `cluster` name. If omitted, the cluster is resolved from the given `target_environment` only. |
 | `ref`                | ❌       | string   | `${{ github.ref || github.sha }}` | Git reference (branch, tag, or commit SHA) for source repo checkout |
 | `delete_first`       | ❌       | boolean  | `false` | Delete ArgoCD app(s) before deploying |
 | `cd_repo`            | ✅       | string   | –       | Continuous deployment repo where templated manifests are committed |
@@ -66,7 +66,7 @@ If neither is provided, the workflow fails.
    - Selects by exact cluster name (case-insensitive).  
 
 2. If `target_cluster` is not set:  
-   - Looks inside the `target` environment only.  
+   - Looks inside the `target_environment` only.  
    - If single cluster → use it.  
    - If multiple clusters → fail with error listing options.  
 
@@ -188,7 +188,7 @@ env:
 When `delete_only: true`:
 
 - **Runs**:
-  - Environment resolution (`env_map` / `target` / `target_cluster`)  
+  - Environment resolution (`env_map` / `target_environment` / `target_cluster`)  
   - Authentication (`argocd_auth_token` or username/password)  
   - ArgoCD connection setup (`argocd_conn`)  
   - ArgoCD app deletion (API calls)  
@@ -217,7 +217,7 @@ jobs:
       cd_repo: continuous-deployment
       cd_repo_org: my-org
       github_environment: prod
-      target: prod
+      target_environment: prod
       target_cluster: aks-prod-weu
       namespace: my-namespace
       delete_only: true
@@ -305,7 +305,7 @@ jobs:
       cd_repo: continuous-deployment
       cd_repo_org: my-org
       github_environment: prod
-      target: prod
+      target_environment: prod
       target_cluster: aks-prod-weu
       namespace: my-namespace
       application: my-app
