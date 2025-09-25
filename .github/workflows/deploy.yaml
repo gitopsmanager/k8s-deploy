@@ -676,28 +676,17 @@ jobs:
         name: built-kustomize-manifest-${{ steps.env.outputs.cluster }}-${{ fromJSON(steps.apps.outputs.apps)[0].name }}
         path: build-output-${{ fromJSON(steps.apps.outputs.apps)[0].name }}.yaml
 
-
-    - name: Commit and push to continuous-deployment repo
+    - name: Commit and push to temp branch
+      id: commit_branch
       if: ${{ inputs.delete_only == false }}
       run: |
         set -euo pipefail
-
         cd continuous-deployment
 
         git config user.name "k8s-deploy"
         git config user.email "actions@gitopsmanager.com"
 
-        echo "Adding files from: ${{ steps.copy.outputs.cd_path_rel }}/"
-        ls -la "${{ steps.copy.outputs.cd_path_rel }}/" || echo "⚠️ Directory not found"
-
-        echo "Before staging:"
-        git status --short
-
         git add -A "${{ steps.copy.outputs.cd_path_rel }}/"
-
-        echo "After staging:"
-        git status --short
-        git diff --cached --stat || true
 
         if git diff --cached --quiet; then
           echo "✅ No changes to commit."
@@ -706,24 +695,41 @@ jobs:
 
         git commit -m "Deploy to ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} (apps: ${{ steps.apps.outputs.count }})"
 
-        branch="$(git rev-parse --abbrev-ref HEAD)"
+        branch="deploy-${{ steps.env.outputs.cluster }}-${{ inputs.namespace }}-$(date +%s)"
+        git push origin HEAD:"$branch"
 
-        for i in 1 2 3 4 5; do
-          if git push origin "$branch"; then
-            echo "✅ Push succeeded"
-            break
-          fi
+        echo "branch=$branch" >> $GITHUB_OUTPUT
+      env:
+        GIT_TOKEN: ${{ steps.generate_token.outputs.token }}
 
-          echo "⚠️ Push failed (attempt $i), rebasing onto latest remote branch '$branch'..."
-          git fetch origin "$branch"
-          git rebase origin/"$branch" || { echo "❌ Rebase failed"; exit 1; }
 
-          # On the 3rd attempt, fail explicitly
-          if [ "$i" -eq 3 ]; then
-            echo "❌ Push failed after 3 attempts"
-            exit 1
-          fi
-        done
+    - name: Create PR and enable auto-merge
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ steps.generate_token.outputs.token }}
+        script: |
+          const branch = "${{ steps.commit_branch.outputs.branch }}";
+          const { data: pr } = await github.rest.pulls.create({
+            owner: "${{ inputs.cd_repo_org }}",
+            repo: "${{ inputs.cd_repo }}",
+            head: branch,
+            base: "main", // or your deployment branch
+            title: `Deploy to ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }}`,
+            body: "Automated deployment update."
+          });
+
+          core.info(`Opened PR #${pr.number}`);
+
+          // Enable auto-merge with squash
+          await github.graphql(`
+            mutation($prId: ID!) {
+              enablePullRequestAutoMerge(input: { pullRequestId: $prId, mergeMethod: SQUASH }) {
+                pullRequest { number }
+              }
+            }
+          `, { prId: pr.node_id });
+
+          core.info(`Enabled auto-merge (squash) for PR #${pr.number}`);
 
 
 
@@ -899,7 +905,8 @@ jobs:
 
           core.setOutput('cd_path_rel', cdRootRel);
 
-    - name: Commit and push deletions to CD repo
+    - name: Commit and push deletions to temp branch
+      id: commit_delete
       if: ${{ inputs.delete_only }}
       run: |
         set -euo pipefail
@@ -909,6 +916,7 @@ jobs:
         git config user.email "actions@gitopsmanager.com"
 
         echo "Staging deletions in: ${{ steps.cdroot.outputs.cd_root }}/"
+
         # rm will stage deletions, ignore if path doesn't exist
         git rm -r "${{ steps.cdroot.outputs.cd_root }}/" 2>/dev/null || true
 
@@ -919,27 +927,43 @@ jobs:
 
         git commit -m "Delete apps in ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} (delete_only mode)"
 
-        branch="$(git rev-parse --abbrev-ref HEAD)"
+        branch="delete-${{ steps.env.outputs.cluster }}-${{ inputs.namespace }}-$(date +%s)"
+        git push origin HEAD:"$branch"
 
-        for i in 1 2 3 4 5; do
-          if git push origin "$branch"; then
-            echo "✅ Push succeeded"
-            break
-          fi
+        echo "branch=$branch" >> $GITHUB_OUTPUT
+      env:
+        GIT_TOKEN: ${{ steps.generate_token.outputs.token }}
 
-          echo "⚠️ Push failed (attempt $i), rebasing onto latest remote branch '$branch'..."
-          git fetch origin "$branch"
-          git rebase origin/"$branch" || { echo "❌ Rebase failed"; exit 1; }
+    - name: Create PR and enable auto-merge (delete-only)
+      if: ${{ inputs.delete_only }}
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ steps.generate_token.outputs.token }}
+        script: |
+          const branch = "${{ steps.commit_delete.outputs.branch }}";
 
-          # On the 3rd attempt, fail explicitly
-          if [ "$i" -eq 3 ]; then
-            echo "❌ Push failed after 3 attempts"
-            exit 1
-          fi
-        done
+          // Create PR
+          const { data: pr } = await github.rest.pulls.create({
+            owner: "${{ inputs.cd_repo_org }}",
+            repo: "${{ inputs.cd_repo }}",
+            head: branch,
+            base: "main", // or your CD branch
+            title: `Delete apps in ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }}`,
+            body: "Automated delete-only deployment update."
+          });
 
+          core.info(`Opened delete-only PR #${pr.number}`);
 
+          // Enable auto-merge with squash
+          await github.graphql(`
+            mutation($prId: ID!) {
+              enablePullRequestAutoMerge(input: { pullRequestId: $prId, mergeMethod: SQUASH }) {
+                pullRequest { number }
+              }
+            }
+          `, { prId: pr.node_id });
 
+          core.info(`Enabled auto-merge (squash) for PR #${pr.number}`);
 
 
     - name: Check or create ArgoCD applications (per app)
