@@ -684,8 +684,6 @@ jobs:
         cd continuous-deployment
 
         echo "🔎 Debug: Current working directory = $(pwd)"
-        echo "🔎 Debug: Git version = $(git --version)"
-        echo "🔎 Debug: Remote configuration:"
         git remote -v
 
         git config user.name "k8s-deploy"
@@ -696,12 +694,14 @@ jobs:
 
         git add -A "${{ steps.copy.outputs.cd_path_rel }}/"
 
-        echo "🔎 Debug: Status before commit:"
+        echo "🔎 Debug: Status after staging:"
         git status --short || true
+        git diff --cached --stat || true
 
         if git diff --cached --quiet; then
-          echo "✅ No changes to commit."
-          exit 0
+          echo "⚠️ No changes detected — creating noop commit"
+          echo "No changes at $(date -u)" > .noop
+          git add .noop
         fi
 
         git commit -m "Deploy to ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} (apps: ${{ steps.apps.outputs.count }})"
@@ -709,21 +709,16 @@ jobs:
         branch="deploy-${{ steps.env.outputs.cluster }}-${{ inputs.namespace }}-$(date +%s)"
         echo "🔎 Debug: Branch to push = $branch"
 
-        echo "🔎 Debug: Local branches:"
-        git branch -vv || true
-
-        echo "🔎 Debug: Last commit:"
         git log -1 --oneline
 
-        echo "🔎 Debug: Attempting to push..."
         git push --verbose origin HEAD:"$branch" || { echo "❌ git push failed"; exit 1; }
 
-        echo "🔎 Debug: Verifying branch exists on remote..."
         git ls-remote origin "refs/heads/$branch" || echo "⚠️ Branch not found on remote"
 
         echo "branch=$branch" >> "$GITHUB_OUTPUT"
       env:
         GIT_TOKEN: ${{ steps.generate_token.outputs.token }}
+
 
 
     - name: Create and squash-merge PR (deploy)
@@ -934,7 +929,6 @@ jobs:
 
           core.setOutput('cd_path_rel', cdRootRel);
 
- 
     - name: Commit and push deletions to temp branch
       id: commit_delete
       if: ${{ inputs.delete_only }}
@@ -943,8 +937,6 @@ jobs:
         cd continuous-deployment
 
         echo "🔎 Debug: Current working directory = $(pwd)"
-        echo "🔎 Debug: Git version = $(git --version)"
-        echo "🔎 Debug: Remote configuration:"
         git remote -v
 
         git config user.name "k8s-deploy"
@@ -953,12 +945,14 @@ jobs:
         echo "Staging deletions in: ${{ steps.cdroot.outputs.cd_root }}/"
         git rm -r "${{ steps.cdroot.outputs.cd_root }}/" 2>/dev/null || true
 
-        echo "🔎 Debug: Status before commit:"
+        echo "🔎 Debug: Status after staging:"
         git status --short || true
+        git diff --cached --stat || true
 
         if git diff --cached --quiet; then
-          echo "✅ No deletions to commit."
-          exit 0
+          echo "⚠️ No deletions detected — creating noop commit"
+          echo "No deletions at $(date -u)" > .noop
+          git add .noop
         fi
 
         git commit -m "Delete apps in ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} (delete_only mode)"
@@ -966,16 +960,10 @@ jobs:
         branch="delete-${{ steps.env.outputs.cluster }}-${{ inputs.namespace }}-$(date +%s)"
         echo "🔎 Debug: Branch to push = $branch"
 
-        echo "🔎 Debug: Local branches:"
-        git branch -vv || true
-
-        echo "🔎 Debug: Last commit:"
         git log -1 --oneline
 
-        echo "🔎 Debug: Attempting to push..."
         git push --verbose origin HEAD:"$branch" || { echo "❌ git push failed"; exit 1; }
 
-        echo "🔎 Debug: Verifying branch exists on remote..."
         git ls-remote origin "refs/heads/$branch" || echo "⚠️ Branch not found on remote"
 
         echo "branch=$branch" >> "$GITHUB_OUTPUT"
