@@ -676,6 +676,7 @@ jobs:
         name: built-kustomize-manifest-${{ steps.env.outputs.cluster }}-${{ fromJSON(steps.apps.outputs.apps)[0].name }}
         path: build-output-${{ fromJSON(steps.apps.outputs.apps)[0].name }}.yaml
 
+
     - name: Commit and push to temp branch
       id: commit_deploy
       if: ${{ inputs.delete_only == false }}
@@ -699,12 +700,11 @@ jobs:
         git diff --cached --stat || true
 
         if git diff --cached --quiet; then
-          echo "⚠️ No changes detected — creating noop commit"
-          echo "No changes at $(date -u)" > .noop
-          git add .noop
+          echo "⚠️ No changes detected — creating empty commit"
+          git commit --allow-empty -m "No-op deploy commit at $(date -u)"
+        else
+          git commit -m "Deploy to ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} (apps: ${{ steps.apps.outputs.count }})"
         fi
-
-        git commit -m "Deploy to ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} (apps: ${{ steps.apps.outputs.count }})"
 
         branch="deploy-${{ steps.env.outputs.cluster }}-${{ inputs.namespace }}-$(date +%s)"
         echo "🔎 Debug: Branch to push = $branch"
@@ -718,6 +718,7 @@ jobs:
         echo "branch=$branch" >> "$GITHUB_OUTPUT"
       env:
         GIT_TOKEN: ${{ steps.generate_token.outputs.token }}
+
 
     - name: Create and squash-merge PR (deploy)
       if: ${{ inputs.delete_only == false }}
@@ -971,12 +972,11 @@ jobs:
         git diff --cached --stat || true
 
         if git diff --cached --quiet; then
-          echo "⚠️ No deletions detected — creating noop commit"
-          echo "No deletions at $(date -u)" > .noop
-          git add .noop
+          echo "⚠️ No deletions detected — creating empty commit"
+          git commit --allow-empty -m "No-op delete commit at $(date -u)"
+        else
+          git commit -m "Delete apps in ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} (delete_only mode)"
         fi
-
-        git commit -m "Delete apps in ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} (delete_only mode)"
 
         branch="delete-${{ steps.env.outputs.cluster }}-${{ inputs.namespace }}-$(date +%s)"
         echo "🔎 Debug: Branch to push = $branch"
@@ -990,6 +990,7 @@ jobs:
         echo "branch=$branch" >> "$GITHUB_OUTPUT"
       env:
         GIT_TOKEN: ${{ steps.generate_token.outputs.token }}
+
 
     - name: Create and squash-merge PR (delete-only)
       if: ${{ inputs.delete_only }}
