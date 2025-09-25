@@ -709,23 +709,21 @@ jobs:
       with:
         github-token: ${{ steps.generate_token.outputs.token }}
         script: |
-          const branch = "${{ steps.commit_deploy.outputs.branch }}";
-          const owner = "${{ inputs.cd_repo_org }}";
-          const repo = "${{ inputs.cd_repo }}";
+          const owner = process.env.CD_REPO_ORG;
+          const repo = process.env.CD_REPO;
+          const branch = process.env.BRANCH;
 
-          // Create PR
           const { data: pr } = await github.rest.pulls.create({
             owner,
             repo,
             head: branch,
-            base: "main", // adjust if your CD branch differs
-            title: `Deploy to ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }}`,
+            base: "main",
+            title: `Deploy to ${process.env.CLUSTER}/${process.env.NAMESPACE}`,
             body: "Automated deployment update."
           });
 
           core.info(`Opened PR #${pr.number}`);
 
-          // Merge it immediately with squash
           await github.rest.pulls.merge({
             owner,
             repo,
@@ -734,7 +732,12 @@ jobs:
           });
 
           core.info(`Squash-merged PR #${pr.number}`);
-
+      env:
+        CD_REPO_ORG: ${{ inputs.cd_repo_org }}
+        CD_REPO: ${{ inputs.cd_repo }}
+        BRANCH: ${{ steps.commit_deploy.outputs.branch }}
+        CLUSTER: ${{ steps.env.outputs.cluster }}
+        NAMESPACE: ${{ inputs.namespace }}
 
 
 
@@ -942,23 +945,21 @@ jobs:
       with:
         github-token: ${{ steps.generate_token.outputs.token }}
         script: |
-          const branch = "${{ steps.commit_delete.outputs.branch }}";
-          const owner = "${{ inputs.cd_repo_org }}";
-          const repo = "${{ inputs.cd_repo }}";
+          const owner = process.env.CD_REPO_ORG;
+          const repo = process.env.CD_REPO;
+          const branch = process.env.BRANCH;
 
-          // Create PR
           const { data: pr } = await github.rest.pulls.create({
             owner,
             repo,
             head: branch,
             base: "main", // adjust if your CD branch differs
-            title: `Delete apps in ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }}`,
+            title: `Delete apps in ${process.env.CLUSTER}/${process.env.NAMESPACE}`,
             body: "Automated delete-only deployment update."
           });
 
           core.info(`Opened delete-only PR #${pr.number}`);
 
-          // Merge it immediately with squash
           await github.rest.pulls.merge({
             owner,
             repo,
@@ -967,6 +968,12 @@ jobs:
           });
 
           core.info(`Squash-merged delete-only PR #${pr.number}`);
+      env:
+        CD_REPO_ORG: ${{ inputs.cd_repo_org }}
+        CD_REPO: ${{ inputs.cd_repo }}
+        BRANCH: ${{ steps.commit_delete.outputs.branch }}
+        CLUSTER: ${{ steps.env.outputs.cluster }}
+        NAMESPACE: ${{ inputs.namespace }}
 
 
     - name: Check or create ArgoCD applications (per app)
