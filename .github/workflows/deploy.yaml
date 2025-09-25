@@ -676,8 +676,9 @@ jobs:
         name: built-kustomize-manifest-${{ steps.env.outputs.cluster }}-${{ fromJSON(steps.apps.outputs.apps)[0].name }}
         path: build-output-${{ fromJSON(steps.apps.outputs.apps)[0].name }}.yaml
 
+
     - name: Commit and push to temp branch
-      id: commit_branch
+      id: commit_deploy
       if: ${{ inputs.delete_only == false }}
       run: |
         set -euo pipefail
@@ -702,35 +703,37 @@ jobs:
       env:
         GIT_TOKEN: ${{ steps.generate_token.outputs.token }}
 
-
-    - name: Create PR and enable auto-merge
+    - name: Create and squash-merge PR (deploy)
+      if: ${{ inputs.delete_only == false }}
       uses: actions/github-script@v7
       with:
         github-token: ${{ steps.generate_token.outputs.token }}
         script: |
-          const branch = "${{ steps.commit_branch.outputs.branch }}";
+          const branch = "${{ steps.commit_deploy.outputs.branch }}";
+          const owner = "${{ inputs.cd_repo_org }}";
+          const repo = "${{ inputs.cd_repo }}";
+
+          // Create PR
           const { data: pr } = await github.rest.pulls.create({
-            owner: "${{ inputs.cd_repo_org }}",
-            repo: "${{ inputs.cd_repo }}",
+            owner,
+            repo,
             head: branch,
-            base: "main", // or your deployment branch
+            base: "main", // adjust if your CD branch differs
             title: `Deploy to ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }}`,
             body: "Automated deployment update."
           });
 
           core.info(`Opened PR #${pr.number}`);
 
-          // Enable auto-merge with squash
-          await github.graphql(`
-            mutation($prId: ID!) {
-              enablePullRequestAutoMerge(input: { pullRequestId: $prId, mergeMethod: SQUASH }) {
-                pullRequest { number }
-              }
-            }
-          `, { prId: pr.node_id });
+          // Merge it immediately with squash
+          await github.rest.pulls.merge({
+            owner,
+            repo,
+            pull_number: pr.number,
+            merge_method: "squash"
+          });
 
-          core.info(`Enabled auto-merge (squash) for PR #${pr.number}`);
-
+          core.info(`Squash-merged PR #${pr.number}`);
 
 
 
@@ -917,7 +920,6 @@ jobs:
 
         echo "Staging deletions in: ${{ steps.cdroot.outputs.cd_root }}/"
 
-        # rm will stage deletions, ignore if path doesn't exist
         git rm -r "${{ steps.cdroot.outputs.cd_root }}/" 2>/dev/null || true
 
         if git diff --cached --quiet; then
@@ -934,36 +936,37 @@ jobs:
       env:
         GIT_TOKEN: ${{ steps.generate_token.outputs.token }}
 
-    - name: Create PR and enable auto-merge (delete-only)
+    - name: Create and squash-merge PR (delete-only)
       if: ${{ inputs.delete_only }}
       uses: actions/github-script@v7
       with:
         github-token: ${{ steps.generate_token.outputs.token }}
         script: |
           const branch = "${{ steps.commit_delete.outputs.branch }}";
+          const owner = "${{ inputs.cd_repo_org }}";
+          const repo = "${{ inputs.cd_repo }}";
 
           // Create PR
           const { data: pr } = await github.rest.pulls.create({
-            owner: "${{ inputs.cd_repo_org }}",
-            repo: "${{ inputs.cd_repo }}",
+            owner,
+            repo,
             head: branch,
-            base: "main", // or your CD branch
+            base: "main", // adjust if your CD branch differs
             title: `Delete apps in ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }}`,
             body: "Automated delete-only deployment update."
           });
 
           core.info(`Opened delete-only PR #${pr.number}`);
 
-          // Enable auto-merge with squash
-          await github.graphql(`
-            mutation($prId: ID!) {
-              enablePullRequestAutoMerge(input: { pullRequestId: $prId, mergeMethod: SQUASH }) {
-                pullRequest { number }
-              }
-            }
-          `, { prId: pr.node_id });
+          // Merge it immediately with squash
+          await github.rest.pulls.merge({
+            owner,
+            repo,
+            pull_number: pr.number,
+            merge_method: "squash"
+          });
 
-          core.info(`Enabled auto-merge (squash) for PR #${pr.number}`);
+          core.info(`Squash-merged delete-only PR #${pr.number}`);
 
 
     - name: Check or create ArgoCD applications (per app)
