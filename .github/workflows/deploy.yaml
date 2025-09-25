@@ -676,7 +676,6 @@ jobs:
         name: built-kustomize-manifest-${{ steps.env.outputs.cluster }}-${{ fromJSON(steps.apps.outputs.apps)[0].name }}
         path: build-output-${{ fromJSON(steps.apps.outputs.apps)[0].name }}.yaml
 
-
     - name: Commit and push to temp branch
       id: commit_deploy
       if: ${{ inputs.delete_only == false }}
@@ -684,10 +683,21 @@ jobs:
         set -euo pipefail
         cd continuous-deployment
 
+        echo "🔎 Debug: Current working directory = $(pwd)"
+        echo "🔎 Debug: Git version = $(git --version)"
+        echo "🔎 Debug: Remote configuration:"
+        git remote -v
+
         git config user.name "k8s-deploy"
         git config user.email "actions@gitopsmanager.com"
 
+        echo "🔎 Debug: Adding files from: ${{ steps.copy.outputs.cd_path_rel }}/"
+        ls -la "${{ steps.copy.outputs.cd_path_rel }}/" || echo "⚠️ Directory not found"
+
         git add -A "${{ steps.copy.outputs.cd_path_rel }}/"
+
+        echo "🔎 Debug: Status before commit:"
+        git status --short || true
 
         if git diff --cached --quiet; then
           echo "✅ No changes to commit."
@@ -697,11 +707,24 @@ jobs:
         git commit -m "Deploy to ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} (apps: ${{ steps.apps.outputs.count }})"
 
         branch="deploy-${{ steps.env.outputs.cluster }}-${{ inputs.namespace }}-$(date +%s)"
-        git push origin HEAD:"$branch"
+        echo "🔎 Debug: Branch to push = $branch"
 
-        echo "branch=$branch" >> $GITHUB_OUTPUT
+        echo "🔎 Debug: Local branches:"
+        git branch -vv || true
+
+        echo "🔎 Debug: Last commit:"
+        git log -1 --oneline
+
+        echo "🔎 Debug: Attempting to push..."
+        git push --verbose origin HEAD:"$branch" || { echo "❌ git push failed"; exit 1; }
+
+        echo "🔎 Debug: Verifying branch exists on remote..."
+        git ls-remote origin "refs/heads/$branch" || echo "⚠️ Branch not found on remote"
+
+        echo "branch=$branch" >> "$GITHUB_OUTPUT"
       env:
         GIT_TOKEN: ${{ steps.generate_token.outputs.token }}
+
 
     - name: Create and squash-merge PR (deploy)
       if: ${{ inputs.delete_only == false }}
@@ -911,6 +934,7 @@ jobs:
 
           core.setOutput('cd_path_rel', cdRootRel);
 
+ 
     - name: Commit and push deletions to temp branch
       id: commit_delete
       if: ${{ inputs.delete_only }}
@@ -918,12 +942,19 @@ jobs:
         set -euo pipefail
         cd continuous-deployment
 
+        echo "🔎 Debug: Current working directory = $(pwd)"
+        echo "🔎 Debug: Git version = $(git --version)"
+        echo "🔎 Debug: Remote configuration:"
+        git remote -v
+
         git config user.name "k8s-deploy"
         git config user.email "actions@gitopsmanager.com"
 
         echo "Staging deletions in: ${{ steps.cdroot.outputs.cd_root }}/"
-
         git rm -r "${{ steps.cdroot.outputs.cd_root }}/" 2>/dev/null || true
+
+        echo "🔎 Debug: Status before commit:"
+        git status --short || true
 
         if git diff --cached --quiet; then
           echo "✅ No deletions to commit."
@@ -933,11 +964,24 @@ jobs:
         git commit -m "Delete apps in ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} (delete_only mode)"
 
         branch="delete-${{ steps.env.outputs.cluster }}-${{ inputs.namespace }}-$(date +%s)"
-        git push origin HEAD:"$branch"
+        echo "🔎 Debug: Branch to push = $branch"
 
-        echo "branch=$branch" >> $GITHUB_OUTPUT
+        echo "🔎 Debug: Local branches:"
+        git branch -vv || true
+
+        echo "🔎 Debug: Last commit:"
+        git log -1 --oneline
+
+        echo "🔎 Debug: Attempting to push..."
+        git push --verbose origin HEAD:"$branch" || { echo "❌ git push failed"; exit 1; }
+
+        echo "🔎 Debug: Verifying branch exists on remote..."
+        git ls-remote origin "refs/heads/$branch" || echo "⚠️ Branch not found on remote"
+
+        echo "branch=$branch" >> "$GITHUB_OUTPUT"
       env:
         GIT_TOKEN: ${{ steps.generate_token.outputs.token }}
+
 
     - name: Create and squash-merge PR (delete-only)
       if: ${{ inputs.delete_only }}
