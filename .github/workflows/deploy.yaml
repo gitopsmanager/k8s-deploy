@@ -789,12 +789,12 @@ jobs:
             });
             core.info(`✅ Squash-merged PR #${pr.number}`);
           }
-        env:
-          CD_REPO_ORG: ${{ inputs.cd_repo_org }}
-          CD_REPO: ${{ inputs.cd_repo }}
-          BRANCH: ${{ steps.commit_deploy.outputs.branch }}
-          CLUSTER: ${{ steps.env.outputs.cluster }}
-          NAMESPACE: ${{ inputs.namespace }}
+      env:
+        CD_REPO_ORG: ${{ inputs.cd_repo_org }}
+        CD_REPO: ${{ inputs.cd_repo }}
+        BRANCH: ${{ steps.commit_deploy.outputs.branch }}
+        CLUSTER: ${{ steps.env.outputs.cluster }}
+        NAMESPACE: ${{ inputs.namespace }}
 
 
     - name: Resolve ArgoCD auth
@@ -1073,12 +1073,12 @@ jobs:
             });
             core.info(`✅ Squash-merged delete-only PR #${pr.number}`);
           }
-        env:
-          CD_REPO_ORG: ${{ inputs.cd_repo_org }}
-          CD_REPO: ${{ inputs.cd_repo }}
-          BRANCH: ${{ steps.commit_delete.outputs.branch }}
-          CLUSTER: ${{ steps.env.outputs.cluster }}
-          NAMESPACE: ${{ inputs.namespace }}
+      env:
+        CD_REPO_ORG: ${{ inputs.cd_repo_org }}
+        CD_REPO: ${{ inputs.cd_repo }}
+        BRANCH: ${{ steps.commit_delete.outputs.branch }}
+        CLUSTER: ${{ steps.env.outputs.cluster }}
+        NAMESPACE: ${{ inputs.namespace }}
 
 
 
