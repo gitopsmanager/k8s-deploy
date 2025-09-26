@@ -724,7 +724,6 @@ jobs:
       env:
         GIT_TOKEN: ${{ steps.generate_token.outputs.token }}
 
-
     - name: Create and squash-merge PR (deploy)
       if: ${{ inputs.delete_only == false }}
       uses: actions/github-script@v7
@@ -751,8 +750,9 @@ jobs:
           });
           core.info(`✅ Opened PR #${pr.number}`);
 
-          // Poll until mergeable is known
+          // Poll until mergeable state is computed
           let mergeable = null;
+          let mergeableState = null;
           for (let i = 0; i < 10; i++) {
             const { data: prStatus } = await github.rest.pulls.get({
               owner,
@@ -760,13 +760,24 @@ jobs:
               pull_number: pr.number
             });
             mergeable = prStatus.mergeable;
-            core.info(`ℹ️ Attempt ${i+1}: mergeable = ${mergeable}`);
+            mergeableState = prStatus.mergeable_state;
+            core.info(`ℹ️ Attempt ${i+1}: mergeable=${mergeable}, state=${mergeableState}`);
             if (mergeable !== null) break;
-            await new Promise(r => setTimeout(r, 2000)); // wait 2s
+            await new Promise(r => setTimeout(r, 2000));
+          }
+
+          if (mergeableState === "behind") {
+            core.info("🔄 Branch is behind base, updating with latest base branch...");
+            await github.rest.repos.merge({
+              owner,
+              repo,
+              base: branch,      // update feature branch
+              head: baseBranch   // merge base into it
+            });
           }
 
           if (mergeable === false) {
-            core.setFailed(`❌ PR #${pr.number} is not mergeable (conflicts or no changes).`);
+            core.setFailed(`❌ PR #${pr.number} is not mergeable (state=${mergeableState}).`);
           } else if (mergeable === null) {
             core.setFailed(`❌ PR #${pr.number} mergeability never resolved.`);
           } else {
@@ -778,12 +789,12 @@ jobs:
             });
             core.info(`✅ Squash-merged PR #${pr.number}`);
           }
-      env:
-        CD_REPO_ORG: ${{ inputs.cd_repo_org }}
-        CD_REPO: ${{ inputs.cd_repo }}
-        BRANCH: ${{ steps.commit_deploy.outputs.branch }}
-        CLUSTER: ${{ steps.env.outputs.cluster }}
-        NAMESPACE: ${{ inputs.namespace }}
+        env:
+          CD_REPO_ORG: ${{ inputs.cd_repo_org }}
+          CD_REPO: ${{ inputs.cd_repo }}
+          BRANCH: ${{ steps.commit_deploy.outputs.branch }}
+          CLUSTER: ${{ steps.env.outputs.cluster }}
+          NAMESPACE: ${{ inputs.namespace }}
 
 
     - name: Resolve ArgoCD auth
@@ -1023,8 +1034,9 @@ jobs:
           });
           core.info(`✅ Opened delete-only PR #${pr.number}`);
 
-          // Poll until mergeable is known
+          // Poll until mergeable state is computed
           let mergeable = null;
+          let mergeableState = null;
           for (let i = 0; i < 10; i++) {
             const { data: prStatus } = await github.rest.pulls.get({
               owner,
@@ -1032,13 +1044,24 @@ jobs:
               pull_number: pr.number
             });
             mergeable = prStatus.mergeable;
-            core.info(`ℹ️ Attempt ${i+1}: mergeable = ${mergeable}`);
+            mergeableState = prStatus.mergeable_state;
+            core.info(`ℹ️ Attempt ${i+1}: mergeable=${mergeable}, state=${mergeableState}`);
             if (mergeable !== null) break;
-            await new Promise(r => setTimeout(r, 2000)); // wait 2s
+            await new Promise(r => setTimeout(r, 2000));
+          }
+
+          if (mergeableState === "behind") {
+            core.info("🔄 Branch is behind base, updating with latest base branch...");
+            await github.rest.repos.merge({
+              owner,
+              repo,
+              base: branch,      // update the PR branch
+              head: baseBranch   // merge base branch into it
+            });
           }
 
           if (mergeable === false) {
-            core.setFailed(`❌ PR #${pr.number} is not mergeable (conflicts or no changes).`);
+            core.setFailed(`❌ PR #${pr.number} is not mergeable (state=${mergeableState}).`);
           } else if (mergeable === null) {
             core.setFailed(`❌ PR #${pr.number} mergeability never resolved.`);
           } else {
@@ -1050,12 +1073,13 @@ jobs:
             });
             core.info(`✅ Squash-merged delete-only PR #${pr.number}`);
           }
-      env:
-        CD_REPO_ORG: ${{ inputs.cd_repo_org }}
-        CD_REPO: ${{ inputs.cd_repo }}
-        BRANCH: ${{ steps.commit_delete.outputs.branch }}
-        CLUSTER: ${{ steps.env.outputs.cluster }}
-        NAMESPACE: ${{ inputs.namespace }}
+        env:
+          CD_REPO_ORG: ${{ inputs.cd_repo_org }}
+          CD_REPO: ${{ inputs.cd_repo }}
+          BRANCH: ${{ steps.commit_delete.outputs.branch }}
+          CLUSTER: ${{ steps.env.outputs.cluster }}
+          NAMESPACE: ${{ inputs.namespace }}
+
 
 
     - name: Check or create ArgoCD applications (per app)
