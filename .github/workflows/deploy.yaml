@@ -582,19 +582,6 @@ jobs:
           core.setOutput('cd_path_rel', cdRootRel);
 
 
-
-    - name: Upload CD repo manifests
-      if: ${{ always() && inputs.delete_only == false }}
-      uses: actions/upload-artifact@v4
-      with:
-        name: templated-source-manifests-${{ steps.env.outputs.cluster }}-${{ fromJSON(steps.apps.outputs.apps)[0].name }}
-        path: ${{ steps.copy.outputs.cd_path }}/${{ fromJSON(steps.apps.outputs.apps)[0].name }}
-
-
-    - name: Debug structure
-      if: ${{ inputs.debug && inputs.delete_only == false }}
-      run: find "${{ steps.copy.outputs.cd_path }}" || echo "Nothing copied!"
-
     - name: Setup Kustomize
       if: ${{ inputs.delete_only == false }}
       uses: imranismail/setup-kustomize@v2
@@ -635,7 +622,25 @@ jobs:
             }
           }
 
+    - name: Replace old Traefik CRD API version
+      if: ${{ inputs.delete_only == false }}
+      run: |
+        echo "🔎 Replacing traefik.containo.us/v1alpha1 → traefik.io/v1alpha1"
+        find "${{ steps.copy.outputs.cd_path }}" -type f \( -name "*.yaml" -o -name "*.yml" \) \
+          -exec sed -i 's#traefik\.containo\.us/v1alpha1#traefik.io/v1alpha1#g' {} +
 
+
+    - name: Upload CD repo manifests
+      if: ${{ always() && inputs.delete_only == false }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: templated-source-manifests-${{ steps.env.outputs.cluster }}-${{ fromJSON(steps.apps.outputs.apps)[0].name }}
+        path: ${{ steps.copy.outputs.cd_path }}/${{ fromJSON(steps.apps.outputs.apps)[0].name }}
+
+
+    - name: Debug structure
+      if: ${{ inputs.debug && inputs.delete_only == false }}
+      run: find "${{ steps.copy.outputs.cd_path }}" || echo "Nothing copied!"
 
     - name: Run kustomize build (concat per app)
       id: kustomize
