@@ -1242,8 +1242,8 @@ jobs:
             }
 
             if (!ok) {
-              core.warning(
-                `⚠️ Sync did not complete in time for ${appName} (last phase=${lastPhase}, sync=${lastSync}, health=${lastHealth})`
+              core.setFailed(
+                `❌ Sync did not complete in time for ${appName} (last phase=${lastPhase}, sync=${lastSync}, health=${lastHealth})`
               );
             }
 
