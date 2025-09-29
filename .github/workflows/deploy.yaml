@@ -706,12 +706,12 @@ jobs:
 
         if git diff --cached --quiet; then
           echo "⚠️ No changes detected — creating empty commit"
-          git commit --allow-empty -m "No-op deploy commit at $(date -u)"
+          git commit --allow-empty -m "No-op deploy commit for ${{ fromJSON(steps.apps.outputs.apps)[0].name }} at $(date -u)"
         else
-          git commit -m "Deploy to ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} (apps: ${{ steps.apps.outputs.count }})"
+          git commit -m "Deploy to ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} for ${{ fromJSON(steps.apps.outputs.apps)[0].name }}"
         fi
 
-        branch="deploy-${{ steps.env.outputs.cluster }}-${{ inputs.namespace }}-$(date +%s)"
+        branch="deploy-${{ steps.env.outputs.cluster }}-${{ inputs.namespace }}-${{ fromJSON(steps.apps.outputs.apps)[0].name }}-$(date +%s)"
         echo "🔎 Debug: Branch to push = $branch"
 
         git log -1 --oneline
@@ -989,12 +989,12 @@ jobs:
 
         if git diff --cached --quiet; then
           echo "⚠️ No deletions detected — creating empty commit"
-          git commit --allow-empty -m "No-op delete commit at $(date -u)"
+          git commit --allow-empty -m "No-op delete commit for ${{ fromJSON(steps.apps.outputs.apps)[0].name }} at $(date -u)"
         else
-          git commit -m "Delete apps in ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} (delete_only mode)"
+          git commit -m "Delete apps in ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} for ${{ fromJSON(steps.apps.outputs.apps)[0].name }} (delete_only mode)"
         fi
 
-        branch="delete-${{ steps.env.outputs.cluster }}-${{ inputs.namespace }}-$(date +%s)"
+        branch="delete-${{ steps.env.outputs.cluster }}-${{ inputs.namespace }}-${{ fromJSON(steps.apps.outputs.apps)[0].name }}-$(date +%s)"
         echo "🔎 Debug: Branch to push = $branch"
 
         git log -1 --oneline
