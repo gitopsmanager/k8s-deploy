@@ -1164,7 +1164,7 @@ jobs:
               }
             }
 
-            const template = fs.readFileSync('reusable/templates/argocd-app-template-v5.json', 'utf8');
+            const template = fs.readFileSync('reusable/templates/argocd-app-template-v6.json', 'utf8');
             const rendered = nunjucks.renderString(template, {
               APP_NAME: appName,
               NAMESPACE: process.env.NAMESPACE,
@@ -1207,14 +1207,9 @@ jobs:
             } catch {}
             baselines[appName] = baseline;
 
-            // ✅ Add prune + CreateNamespace
-            const syncPayload = JSON.stringify({
-              prune: true,
-              syncOptions: ["CreateNamespace=true"]
-            });
-
-            execSync(`curl -s ${process.env.CURL_SSL_FLAGS} -X POST "${statusUrl}/sync" -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" -H "Content-Type: application/json" -d '${syncPayload}'`);
-            core.info(`🚀 Sync triggered with prune+CreateNamespace: ${appName}`);
+            // 🔄 Reverted: no prune / no syncOptions
+            execSync(`curl -s ${process.env.CURL_SSL_FLAGS} -X POST "${statusUrl}/sync" -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" -H "Content-Type: application/json" -d '{}'`);
+            core.info(`🚀 Sync triggered: ${appName}`);
           }
 
           core.setOutput('baselines', JSON.stringify(baselines));
