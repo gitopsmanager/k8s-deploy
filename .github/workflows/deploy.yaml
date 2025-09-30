@@ -1241,7 +1241,7 @@ jobs:
             let lastPhase, lastSync, lastHealth;
             let consecutiveErrors = 0;
 
-            for (let i = 0; i < 18; i++) {
+            for (let i = 0; i < 36; i++) {
               try {
                 const status = execSync(
                   `curl -s ${process.env.CURL_SSL_FLAGS} -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" "${statusUrl}"`
@@ -1254,7 +1254,7 @@ jobs:
                 lastHealth = json?.status?.health?.status;
 
                 core.info(
-                  `🔄 Iteration ${i + 1}/18 for ${appName}: phase=${lastPhase}, sync=${lastSync}, health=${lastHealth}`
+                  `🔄 Iteration ${i + 1}/36 for ${appName}: phase=${lastPhase}, sync=${lastSync}, health=${lastHealth}`
                 );
 
                 consecutiveErrors = 0; // reset error counter if fetch succeeded
