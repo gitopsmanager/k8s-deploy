@@ -1265,11 +1265,13 @@ jobs:
                   return;
                 }
 
-                // Only check once operation has started after baseline
-                if (op?.startedAt && new Date(op.startedAt).getTime() > baseline) {
+                const startedAt = op?.startedAt ? new Date(op.startedAt).getTime() : 0;
+
+                // Case 1: new operation started after baseline
+                if (startedAt > baseline) {
                   if (lastPhase === 'Succeeded' && lastSync === 'Synced') {
                     if (lastHealth === 'Healthy') {
-                      core.info(`✅ ${appName} is Synced and Healthy.`);
+                      core.info(`✅ ${appName} synced after baseline and is Healthy.`);
                       ok = true;
                       break;
                     } else if (lastHealth === 'Degraded') {
@@ -1278,6 +1280,15 @@ jobs:
                     } else {
                       core.info(`⏳ ${appName} is Synced but health=${lastHealth} → waiting for Healthy...`);
                     }
+                  }
+                }
+
+                // Case 2: no new operation, but app is already good
+                if (startedAt <= baseline) {
+                  if (lastSync === 'Synced' && lastHealth === 'Healthy') {
+                    core.info(`✅ ${appName} was already Synced and Healthy before baseline.`);
+                    ok = true;
+                    break;
                   }
                 }
               } catch (err) {
