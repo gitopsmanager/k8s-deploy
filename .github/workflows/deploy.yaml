@@ -1207,11 +1207,18 @@ jobs:
             } catch {}
             baselines[appName] = baseline;
 
-            execSync(`curl -s ${process.env.CURL_SSL_FLAGS} -X POST "${statusUrl}/sync" -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" -H "Content-Type: application/json" -d '{}'`);
-            core.info(`🚀 Sync triggered: ${appName}`);
+            // ✅ Add prune + CreateNamespace
+            const syncPayload = JSON.stringify({
+              prune: true,
+              syncOptions: ["CreateNamespace=true"]
+            });
+
+            execSync(`curl -s ${process.env.CURL_SSL_FLAGS} -X POST "${statusUrl}/sync" -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" -H "Content-Type: application/json" -d '${syncPayload}'`);
+            core.info(`🚀 Sync triggered with prune+CreateNamespace: ${appName}`);
           }
 
           core.setOutput('baselines', JSON.stringify(baselines));
+
 
     - name: Wait for ArgoCD sync (per app)
       if: ${{ inputs.skip_status_check == false && inputs.delete_only == false }}
