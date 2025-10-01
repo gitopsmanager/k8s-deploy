@@ -513,7 +513,7 @@ jobs:
             files.forEach(f => core.info("  - " + f));
 
             for (const f of files) {
-              if (/\.(ya?ml|json)$/i.test(f)) {
+              if (/\.(ya?ml|json)$/i.test(f) && !/notemplate\.ya?ml$/i.test(f)) {
                 const template = fs.readFileSync(f, 'utf8');
                 const rendered = nunjucks.renderString(template, vars);
                 fs.writeFileSync(f, rendered, 'utf8');
