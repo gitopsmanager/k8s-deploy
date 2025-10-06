@@ -1177,6 +1177,7 @@ jobs:
             core.info(`✅ Created Argo app ${appName}`);
           }
 
+
     - name: Sync ArgoCD apps (per app)
       id: sync
       if: ${{ inputs.delete_only == false }}
@@ -1207,9 +1208,13 @@ jobs:
             } catch {}
             baselines[appName] = baseline;
 
-            // 🔄 Reverted: no prune / no syncOptions
-            execSync(`curl -s ${process.env.CURL_SSL_FLAGS} -X POST "${statusUrl}/sync" -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" -H "Content-Type: application/json" -d '{}'`);
-            core.info(`🚀 Sync triggered: ${appName}`);
+            // 🧨 Force prune sync
+            execSync(`curl -s ${process.env.CURL_SSL_FLAGS} -X POST "${statusUrl}/sync" \
+              -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d '{"prune": true, "force": true}'`);
+
+            core.info(`🚀 Force-prune sync triggered: ${appName}`);
           }
 
           core.setOutput('baselines', JSON.stringify(baselines));
