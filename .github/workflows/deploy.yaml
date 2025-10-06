@@ -666,7 +666,7 @@ jobs:
               ? `${process.env.CD_PATH}/${app.name}/overlays/${overlayDir}`
               : `${process.env.CD_PATH}/${app.name}`;
 
-            const yaml = execSync(`bash -lc 'cd "${dir}" && kustomize build .'`, { encoding: 'utf8' });
+            const yaml = execSync(`bash -lc 'cd "${dir}" && kustomize build --load-restrictor=LoadRestrictionsNone .'`, { encoding: 'utf8' });
             fs.appendFileSync(outFile, (first ? '' : '\n---\n') + yaml);
             first = false;
           }
