@@ -1236,6 +1236,19 @@ jobs:
           const apps = JSON.parse(process.env.APPS || '[]');
           const baselines = JSON.parse(process.env.BASELINES || '{}');
 
+          // Helper: determine if all resources are synced
+          function allResourcesSynced(json) {
+            const results =
+              json?.status?.operationState?.syncResult?.resources ||
+              json?.status?.operationState?.results ||
+              [];
+            return (
+              Array.isArray(results) &&
+              results.length > 0 &&
+              results.every(r => r.status === 'Synced' || r.hookPhase === 'Succeeded')
+            );
+          }
+
           for (const app of apps) {
             const appName = `${process.env.NAMESPACE}-${app.name}`;
             const statusUrl = `${process.env.ARGOCD_URL}/api/v1/applications/${appName}`;
@@ -1271,20 +1284,32 @@ jobs:
                 }
 
                 const startedAt = op?.startedAt ? new Date(op.startedAt).getTime() : 0;
+                const allSynced = allResourcesSynced(json);
 
                 // Case 1: new operation started after baseline
                 if (startedAt > baseline) {
-                  if (lastPhase === 'Succeeded' && lastSync === 'Synced') {
-                    if (lastHealth === 'Healthy') {
-                      core.info(`✅ ${appName} synced after baseline and is Healthy.`);
-                      ok = true;
-                      break;
-                    } else if (lastHealth === 'Degraded') {
-                      core.setFailed(`❌ ${appName} is Synced but health=Degraded.`);
-                      return;
-                    } else {
-                      core.info(`⏳ ${appName} is Synced but health=${lastHealth} → waiting for Healthy...`);
-                    }
+                  if (lastHealth === 'Degraded') {
+                    core.setFailed(`❌ ${appName} is Synced but health=Degraded.`);
+                    return;
+                  }
+
+                  // Standard success condition
+                  if (lastPhase === 'Succeeded' && lastSync === 'Synced' && lastHealth === 'Healthy') {
+                    core.info(`✅ ${appName} synced after baseline and is Healthy.`);
+                    ok = true;
+                    break;
+                  }
+
+                  // New condition: All resources synced, app healthy
+                  else if (allSynced && lastHealth === 'Healthy') {
+                    core.info(`✅ ${appName} has all synced results and is Healthy.`);
+                    ok = true;
+                    break;
+                  }
+
+                  // Waiting state
+                  else if (lastSync === 'Synced') {
+                    core.info(`⏳ ${appName} is Synced but health=${lastHealth} → waiting for Healthy...`);
                   }
                 }
 
@@ -1321,4 +1346,3 @@ jobs:
 
             core.endGroup();
           }
-
