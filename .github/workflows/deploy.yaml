@@ -149,6 +149,9 @@ on:
       ARGOCD_PASSWORD:
         required: false
 
+permissions:
+  id-token: write    # ✅ allows requesting OIDC token
+
 jobs:
   deploy:
     name: >-
