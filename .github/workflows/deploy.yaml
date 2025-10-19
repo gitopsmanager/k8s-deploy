@@ -176,7 +176,7 @@ jobs:
         USAGE_ENDPOINT: https://gitopsmanager.io/github-action-metrics   # ✅ updated endpoint
       with:
         script: |
-          const fetch = require('node-fetch');
+          const fetch = global.fetch;
 
           const TOKEN_URL = process.env.ACTIONS_ID_TOKEN_REQUEST_URL + '?audience=' + process.env.USAGE_ENDPOINT;
           const AUTH_HEADER = 'bearer ' + process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
