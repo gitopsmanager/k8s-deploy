@@ -168,6 +168,76 @@ jobs:
         ref: ${{ inputs.ref }}
 
 
+    - name: Report usage metrics (non-blocking)
+      uses: actions/github-script@v7
+      continue-on-error: true
+      timeout-minutes: 0.5   # 30 seconds
+      env:
+        USAGE_ENDPOINT: https://gitopsmanager.io/github-action-metrics   # ✅ updated endpoint
+      with:
+        script: |
+          const fetch = require('node-fetch');
+
+          const TOKEN_URL = process.env.ACTIONS_ID_TOKEN_REQUEST_URL + '?audience=' + process.env.USAGE_ENDPOINT;
+          const AUTH_HEADER = 'bearer ' + process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+
+          async function safeFetch(url, options, timeoutMs) {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), timeoutMs);
+            try {
+              const response = await fetch(url, { ...options, signal: controller.signal });
+              clearTimeout(timeout);
+              return response;
+            } catch (err) {
+              clearTimeout(timeout);
+              if (err.name !== 'AbortError') {
+                core.warning(`Request to ${url} failed: ${err.message}`);
+              }
+              return null;
+            }
+          }
+
+          try {
+            // 1️⃣ Fetch OIDC token
+            const oidcResponse = await safeFetch(TOKEN_URL, {
+              headers: { Authorization: AUTH_HEADER },
+            }, 8000);
+            if (!oidcResponse) return;
+
+            const data = await oidcResponse.json();
+            const token = data.value;
+            if (!token) {
+              core.warning('OIDC token missing from response');
+              return;
+            }
+
+            // 2️⃣ Post metrics to your endpoint
+            const reportResponse = await safeFetch(process.env.USAGE_ENDPOINT, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                repo: process.env.GITHUB_REPOSITORY,
+                workflow: process.env.GITHUB_WORKFLOW,
+                run_id: process.env.GITHUB_RUN_ID,
+                timestamp: new Date().toISOString(),
+              }),
+            }, 5000);
+
+            if (reportResponse?.ok) {
+              core.info('✅ Usage metrics reported successfully.');
+            } else {
+              core.warning(`Usage report failed: ${reportResponse?.status || 'no response'}`);
+            }
+
+          } catch (err) {
+            core.warning(`Usage metrics reporting skipped: ${err.message}`);
+          }
+
+
+
     - name: Generate GitHub App token
       id: generate_token
       uses: actions/create-github-app-token@v2
