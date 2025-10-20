@@ -207,7 +207,7 @@ jobs:
 
             if (resp.ok) {
               core.info(`✅ Usage metrics reported successfully (${resp.status}).`);
-              core.debug(`🔍 Response body: ${text}`);
+              core.info(`🔍 Response body: ${text}`);
             } else {
               core.warning(`⚠️ Metrics report failed: HTTP ${resp.status}`);
               core.warning(`Response body: ${text}`);
