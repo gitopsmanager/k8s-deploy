@@ -169,17 +169,15 @@ jobs:
         path: source
         ref: ${{ inputs.ref }}
 
-
     - name: Report usage metrics (non-blocking)
       uses: actions/github-script@v7
       continue-on-error: true
       timeout-minutes: 0.5
       env:
-        USAGE_ENDPOINT: https://gitopsmanager.io/github-action-metrics   # ✅ Metrics ingest endpoint
+        USAGE_ENDPOINT: https://gitopsmanager.io/github-action-metrics
       with:
         script: |
           const fetch = global.fetch;
-
           const endpoint = process.env.USAGE_ENDPOINT;
           if (!endpoint) {
             core.warning('❌ USAGE_ENDPOINT is not defined');
@@ -192,7 +190,7 @@ jobs:
           const payload = {
             org,
             repo,
-            action: "deploy",
+            action: "deploy", // or "build" etc.
             timestamp: new Date().toISOString(),
           };
 
@@ -205,14 +203,20 @@ jobs:
               body: JSON.stringify(payload),
             });
 
+            const text = await resp.text(); // read raw body once
+
             if (resp.ok) {
-              core.info("✅ Usage metrics reported successfully.");
+              core.info(`✅ Usage metrics reported successfully (${resp.status}).`);
+              core.debug(`🔍 Response body: ${text}`);
             } else {
-              core.warning(`⚠️ Usage report failed: ${resp.status}`);
+              core.warning(`⚠️ Metrics report failed: HTTP ${resp.status}`);
+              core.warning(`Response body: ${text}`);
             }
           } catch (err) {
-            core.warning(`❌ Metrics request failed: ${err.message}`);
+            core.warning(`❌ Metrics request threw: ${err.message}`);
           }
+
+
 
     - name: Generate GitHub App token
       id: generate_token
