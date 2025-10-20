@@ -214,7 +214,14 @@ jobs:
             core.warning(`❌ Metrics request failed: ${err.message}`);
           }
 
-
+    - name: Generate GitHub App token
+      id: generate_token
+      uses: actions/create-github-app-token@v2
+      with:
+        app-id: ${{ secrets.CONTINUOUS_DEPLOYMENT_GH_APP_ID }}
+        private-key: ${{ secrets.CONTINUOUS_DEPLOYMENT_GH_APP_PRIVATE_KEY }}
+        owner: ${{ inputs.cd_repo_org }}
+        repositories: ${{ inputs.cd_repo }}
 
 
     - name: Checkout reusable workflow repo
