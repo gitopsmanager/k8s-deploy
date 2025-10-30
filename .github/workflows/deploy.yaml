@@ -853,9 +853,9 @@ jobs:
           } finally {
             // --- Always cleanup ---
             if (prNumber) {
-              core.info(`🧹 Cleanup: leaving PR #${prNumber} open as it failed and deleting branch '${branch}'...`);
-             
-
+              if (!merged) {
+                core.info(`🧹 Cleanup: leaving PR #${prNumber} open as it failed and deleting branch '${branch}'...`);
+              }
               // --- Guard protected branches from deletion ---
               const protectedBranches = ["main", "master"];
               if (protectedBranches.includes(branch)) {
