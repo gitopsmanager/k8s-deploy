@@ -853,14 +853,8 @@ jobs:
           } finally {
             // --- Always cleanup ---
             if (prNumber) {
-              core.info(`🧹 Cleanup: closing PR #${prNumber} and deleting branch '${branch}'...`);
-              try {
-                await github.rest.pulls.update({
-                  owner, repo, pull_number: prNumber, state: "closed"
-                });
-              } catch (e) {
-                core.warning(`⚠️ Could not close PR #${prNumber}: ${e.message}`);
-              }
+              core.info(`🧹 Cleanup: leaving PR #${prNumber} open as it failed and deleting branch '${branch}'...`);
+             
 
               // --- Guard protected branches from deletion ---
               const protectedBranches = ["main", "master"];
