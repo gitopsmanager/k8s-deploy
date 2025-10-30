@@ -785,12 +785,40 @@ jobs:
           const branch = process.env.BRANCH;
           const appName = process.env.APP_NAME;
 
-          // Detect default branch dynamically
+          // --- Utility helpers ---
+          async function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+          const pollPhases = [
+            { interval: 2000, count: 10 },  // fast
+            { interval: 3000, count: 10 },  // medium
+            { interval: 5000, count: 10 }   // slow
+          ];
+
+          async function pollMergeability(owner, repo, prNumber, label) {
+            let mergeable = null;
+            let mergeableState = null;
+            for (const phase of pollPhases) {
+              for (let i = 0; i < phase.count; i++) {
+                const { data: prStatus } = await github.rest.pulls.get({
+                  owner, repo, pull_number: prNumber
+                });
+                mergeable = prStatus.mergeable;
+                mergeableState = prStatus.mergeable_state;
+                core.info(`${label} → ${i + 1}: mergeable=${mergeable}, state=${mergeableState}`);
+                if (mergeable !== null && !["unknown", "checking"].includes(mergeableState))
+                  return { mergeable, mergeableState };
+                await wait(phase.interval);
+              }
+            }
+            return { mergeable, mergeableState };
+          }
+
+          // --- Detect default branch dynamically ---
           const { data: repoInfo } = await github.rest.repos.get({ owner, repo });
           const baseBranch = repoInfo.default_branch;
           core.info(`ℹ️ Default branch for ${owner}/${repo} = ${baseBranch}`);
 
-          // Create PR
+          // --- Create PR ---
           const { data: pr } = await github.rest.pulls.create({
             owner,
             repo,
@@ -801,54 +829,56 @@ jobs:
           });
           core.info(`✅ Opened PR #${pr.number}`);
 
-          // Poll until mergeable state is computed
-          let mergeable = null;
-          let mergeableState = null;
-          for (let i = 0; i < 10; i++) {
-            const { data: prStatus } = await github.rest.pulls.get({
-              owner,
-              repo,
-              pull_number: pr.number
-            });
-            mergeable = prStatus.mergeable;
-            mergeableState = prStatus.mergeable_state;
-            core.info(`ℹ️ Attempt ${i+1}: mergeable=${mergeable}, state=${mergeableState}`);
-            if (mergeable !== null) break;
-            await new Promise(r => setTimeout(r, 2000));
+          // --- Initial mergeability poll ---
+          let { mergeable, mergeableState } = await pollMergeability(owner, repo, pr.number, "Initial poll");
+
+          // --- Handle 'dirty' (base moved) state once ---
+          if (mergeable === false && mergeableState === "dirty") {
+            core.warning(`⚠️ PR #${pr.number} dirty — updating branch and re-polling.`);
+            try {
+              await github.rest.pulls.updateBranch({ owner, repo, pull_number: pr.number });
+              await wait(5000); // allow recompute
+            } catch (e) {
+              core.warning(`⚠️ updateBranch() failed (may already be current): ${e.message}`);
+            }
+            ({ mergeable, mergeableState } = await pollMergeability(owner, repo, pr.number, "Post-update poll"));
           }
 
-          if (mergeable === false) {
-            core.setFailed(`❌ PR #${pr.number} is not mergeable (state=${mergeableState}).`);
-          } else if (mergeable === null) {
-            core.setFailed(`❌ PR #${pr.number} mergeability never resolved.`);
-          } else {
-            // 🔁 Retry loop for transient "base modified" errors
-            const maxRetries = 10;
-            let merged = false;
-            for (let i = 0; i < maxRetries; i++) {
-              try {
-                await github.rest.pulls.merge({
-                  owner,
-                  repo,
-                  pull_number: pr.number,
-                  merge_method: "squash"
-                });
-                core.info(`✅ Squash-merged PR #${pr.number} on attempt ${i+1}`);
-                merged = true;
-                break;
-              } catch (err) {
-                if (err.message && err.message.includes("Base branch was modified")) {
-                  core.warning(`⚠️ Attempt ${i+1}: base branch changed, retrying in 2s...`);
-                  await new Promise(r => setTimeout(r, 2000));
-                  continue;
-                }
-                throw err; // bubble up non-race-condition errors
+          // --- Decide outcome based on final state ---
+          if (mergeable === null) {
+            core.setFailed(`❌ Mergeability never resolved for PR #${pr.number}.`);
+            return;
+          }
+
+          if (mergeable === false && mergeableState === "dirty") {
+            core.setFailed(`❌ Real merge conflict detected (state=dirty). Manual resolution required.`);
+            return;
+          }
+
+          // --- Attempt squash merge with retries ---
+          const maxRetries = 10;
+          for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+              await github.rest.pulls.merge({
+                owner,
+                repo,
+                pull_number: pr.number,
+                merge_method: "squash"
+              });
+              core.info(`✅ Squash-merged PR #${pr.number} on attempt ${attempt}`);
+              return;
+            } catch (err) {
+              const msg = err.message || "";
+              if (msg.includes("Base branch was modified") || msg.includes("not mergeable")) {
+                core.warning(`⚠️ Attempt ${attempt}: base branch changed, retrying in ${2 + attempt}s…`);
+                await wait((2 + attempt) * 1000);
+                continue;
               }
-            }
-            if (!merged) {
-              core.setFailed(`❌ Could not squash-merge PR #${pr.number} after ${maxRetries} retries`);
+              throw err; // non-retryable
             }
           }
+
+          core.setFailed(`❌ Could not squash-merge PR #${pr.number} after ${maxRetries} retries.`);
       env:
         CD_REPO_ORG: ${{ inputs.cd_repo_org }}
         CD_REPO: ${{ inputs.cd_repo }}
@@ -856,6 +886,7 @@ jobs:
         CLUSTER: ${{ steps.env.outputs.cluster }}
         NAMESPACE: ${{ inputs.namespace }}
         APP_NAME: ${{ fromJSON(steps.apps.outputs.apps)[0].name }}
+
 
 
 
