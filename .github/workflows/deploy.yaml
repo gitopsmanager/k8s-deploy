@@ -774,7 +774,7 @@ jobs:
         GIT_TOKEN: ${{ steps.generate_token.outputs.token }}
 
 
-    - name: Create and squash-merge PR (deploy)
+    - name: Simple retrying API-based squash merge (deploy)
       if: ${{ inputs.delete_only == false }}
       uses: actions/github-script@v7
       with:
@@ -785,100 +785,99 @@ jobs:
           const branch = process.env.BRANCH;
           const appName = process.env.APP_NAME;
 
-          // --- Utility helpers ---
           async function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-          const pollPhases = [
-            { interval: 2000, count: 10 },  // fast
-            { interval: 3000, count: 10 },  // medium
-            { interval: 5000, count: 10 }   // slow
-          ];
+          const fixedRetries = 10;   // 2s interval
+          const randomRetries = 20;  // 1–7.5s randomized
+          const maxRetries = fixedRetries + randomRetries;
+          let prNumber = null;
+          let merged = false;
 
-          async function pollMergeability(owner, repo, prNumber, label) {
-            let mergeable = null;
-            let mergeableState = null;
-            for (const phase of pollPhases) {
-              for (let i = 0; i < phase.count; i++) {
-                const { data: prStatus } = await github.rest.pulls.get({
-                  owner, repo, pull_number: prNumber
+          try {
+            // --- Detect base branch ---
+            const { data: repoInfo } = await github.rest.repos.get({ owner, repo });
+            const baseBranch = repoInfo.default_branch;
+            core.info(`ℹ️ Default branch = ${baseBranch}`);
+
+            // --- Create PR ---
+            const { data: pr } = await github.rest.pulls.create({
+              owner,
+              repo,
+              head: branch,
+              base: baseBranch,
+              title: `Deploy ${appName} to ${process.env.CLUSTER}/${process.env.NAMESPACE}`,
+              body: "Automated deployment update."
+            });
+            prNumber = pr.number;
+            core.info(`✅ Opened PR #${pr.number}`);
+
+            // --- Attempt merge loop ---
+            for (let attempt = 1; attempt <= maxRetries; attempt++) {
+              try {
+                await github.rest.pulls.merge({
+                  owner,
+                  repo,
+                  pull_number: pr.number,
+                  merge_method: "squash"
                 });
-                mergeable = prStatus.mergeable;
-                mergeableState = prStatus.mergeable_state;
-                core.info(`${label} → ${i + 1}: mergeable=${mergeable}, state=${mergeableState}`);
-                if (mergeable !== null && !["unknown", "checking"].includes(mergeableState))
-                  return { mergeable, mergeableState };
-                await wait(phase.interval);
+                core.info(`✅ Squash-merged PR #${pr.number} on attempt ${attempt}`);
+                merged = true;
+                break;
+              } catch (err) {
+                const msg = err.message || "";
+                core.warning(`⚠️ Merge attempt ${attempt} failed: ${msg}`);
+
+                // Hard conflict — same-file edits — fail immediately
+                if (/conflict|cannot.*merge.*due to conflicts/i.test(msg)) {
+                  core.setFailed(`❌ Real merge conflict detected for PR #${pr.number}.`);
+                  break;
+                }
+
+                // Otherwise, retry (transient base-modified/unknown state)
+                if (attempt <= fixedRetries) {
+                  await wait(2000); // first 10 tries = fixed 2s
+                } else {
+                  const delay = 1000 + Math.random() * 6500; // 1–7.5s
+                  core.info(`⏳ Retrying in ${(delay / 1000).toFixed(1)}s...`);
+                  await wait(delay);
+                }
               }
             }
-            return { mergeable, mergeableState };
-          }
 
-          // --- Detect default branch dynamically ---
-          const { data: repoInfo } = await github.rest.repos.get({ owner, repo });
-          const baseBranch = repoInfo.default_branch;
-          core.info(`ℹ️ Default branch for ${owner}/${repo} = ${baseBranch}`);
-
-          // --- Create PR ---
-          const { data: pr } = await github.rest.pulls.create({
-            owner,
-            repo,
-            head: branch,
-            base: baseBranch,
-            title: `Deploy ${appName} to ${process.env.CLUSTER}/${process.env.NAMESPACE}`,
-            body: "Automated deployment update."
-          });
-          core.info(`✅ Opened PR #${pr.number}`);
-
-          // --- Initial mergeability poll ---
-          let { mergeable, mergeableState } = await pollMergeability(owner, repo, pr.number, "Initial poll");
-
-          // --- Handle 'dirty' (base moved) state once ---
-          if (mergeable === false && mergeableState === "dirty") {
-            core.warning(`⚠️ PR #${pr.number} dirty — updating branch and re-polling.`);
-            try {
-              await github.rest.pulls.updateBranch({ owner, repo, pull_number: pr.number });
-              await wait(5000); // allow recompute
-            } catch (e) {
-              core.warning(`⚠️ updateBranch() failed (may already be current): ${e.message}`);
+            if (!merged) {
+              core.setFailed(`❌ Could not squash-merge PR #${pr.number} after ${maxRetries} attempts.`);
             }
-            ({ mergeable, mergeableState } = await pollMergeability(owner, repo, pr.number, "Post-update poll"));
-          }
 
-          // --- Decide outcome based on final state ---
-          if (mergeable === null) {
-            core.setFailed(`❌ Mergeability never resolved for PR #${pr.number}.`);
-            return;
-          }
-
-          if (mergeable === false && mergeableState === "dirty") {
-            core.setFailed(`❌ Real merge conflict detected (state=dirty). Manual resolution required.`);
-            return;
-          }
-
-          // --- Attempt squash merge with retries ---
-          const maxRetries = 10;
-          for (let attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-              await github.rest.pulls.merge({
-                owner,
-                repo,
-                pull_number: pr.number,
-                merge_method: "squash"
-              });
-              core.info(`✅ Squash-merged PR #${pr.number} on attempt ${attempt}`);
-              return;
-            } catch (err) {
-              const msg = err.message || "";
-              if (msg.includes("Base branch was modified") || msg.includes("not mergeable")) {
-                core.warning(`⚠️ Attempt ${attempt}: base branch changed, retrying in ${2 + attempt}s…`);
-                await wait((2 + attempt) * 1000);
-                continue;
+          } catch (err) {
+            core.setFailed(`❌ Error during deploy PR merge process: ${err.message || err}`);
+          } finally {
+            // --- Always cleanup ---
+            if (prNumber) {
+              core.info(`🧹 Cleanup: closing PR #${prNumber} and deleting branch '${branch}'...`);
+              try {
+                await github.rest.pulls.update({
+                  owner, repo, pull_number: prNumber, state: "closed"
+                });
+              } catch (e) {
+                core.warning(`⚠️ Could not close PR #${prNumber}: ${e.message}`);
               }
-              throw err; // non-retryable
+
+              // --- Guard protected branches from deletion ---
+              const protectedBranches = ["main", "master"];
+              if (protectedBranches.includes(branch)) {
+                core.warning(`🚫 Skipping deletion of protected branch '${branch}'.`);
+              } else {
+                try {
+                  await github.rest.git.deleteRef({
+                    owner, repo, ref: `heads/${branch}`
+                  });
+                  core.info(`🗑️ Deleted branch '${branch}'.`);
+                } catch (e) {
+                  core.warning(`⚠️ Could not delete branch '${branch}': ${e.message}`);
+                }
+              }
             }
           }
-
-          core.setFailed(`❌ Could not squash-merge PR #${pr.number} after ${maxRetries} retries.`);
       env:
         CD_REPO_ORG: ${{ inputs.cd_repo_org }}
         CD_REPO: ${{ inputs.cd_repo }}
