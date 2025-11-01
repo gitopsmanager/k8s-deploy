@@ -1,12 +1,77 @@
-# 🚀 Reusable GitHub Workflow: Kubernetes App Deployment with ArgoCD (v2)
+# 🚀 Reusable GitHub Workflow: Kubernetes App Deployment with ArgoCD — *Open Source* & Stable `@v2`
 
 This reusable workflow automates Kubernetes application deployment using [Kustomize](https://kubectl.docs.kubernetes.io/references/kustomize/) and [ArgoCD](https://argo-cd.readthedocs.io/en/stable/).  
 
+
 It renders manifest files using **Jinja2-style templating implemented with [Nunjucks](https://mozilla.github.io/nunjucks/)**, commits the results into your **continuous deployment (CD) repo**, and uses the **ArgoCD REST API** to create, sync, and validate applications.
+It also uploads artifacts for the **Kustomize build** and the **templated files** to be checked into the CD repo, which can be used for **troubleshooting any issues with Kustomize**.
+
+🧩 **Open Source:** Maintained by **Affinity7 Consulting Ltd**, this workflow is part of the [**GitOps Manager™**](https://gitopsmanager.io) open-source toolchain — powering both community and enterprise GitOps automation across AWS and Azure.
 
 > ✅ **First-time deployments are supported** – ArgoCD apps are auto-created if missing.  
-> 🗑️ **Optional `delete_first`** – force ArgoCD app deletion before re-create.  
-> ⚠️ **Self-hosted runner required** – must have cluster network access and tooling installed.  
+> 🗑️ **Optional `delete_first`** – force ArgoCD app deletion before re-create (**then performs a full redeploy**).  
+> ⚠️ **Self-hosted runner required** – must have cluster network access and tooling installed.
+
+---
+
+## 🌐 GitOps Manager™ Enterprise Platform
+
+[**GitOps Manager™ Enterprise**](https://gitopsmanager.io) is the full platform that powers this open-source workflow.  
+It’s a **turnkey GitOps automation platform** for AWS and Azure — combining open-source GitHub Actions, Kubernetes infrastructure automation, and global-scale CI/CD.
+
+**Highlights:**
+- Secure, opinionated **multi-cloud GitOps automation** for Kubernetes workloads.  
+- Deep integration with **ArgoCD**, **Argo Workflows**, **Traefik**, **ECK**, and **Kubernetes Dashboard**.  
+- Built for **high availability**, **autoscaling**, and **managed upgrades**.  
+- Supports **Workload Identity**, **Pod Identity**, and **private, network-isolated clusters**.  
+- Enables **global deployments**, **secret management**, and **production-grade infrastructure** with **zero vendor lock-in**.
+
+🔗 Learn more: [https://gitopsmanager.io](https://gitopsmanager.io)
+
+---
+
+## 📊 Collection of Usage Metrics
+
+This workflow reports **non-identifiable usage metrics** to help the maintainers understand adoption and improve open-source GitOps tooling.
+
+Each run sends a small JSON payload like:
+```json
+{
+  "action": "deploy",
+  "org": "<hashed>",
+  "repo": "<hashed>",
+  "timestamp": "2025-11-01T12:00:00Z"
+}
+```
+
+Data is sent to [gitopsmanager.io/github-action-metrics](https://gitopsmanager.io/github-action-metrics) and used only for **aggregate, anonymized statistics** shown publicly on [gitopsmanager.io](https://gitopsmanager.io).
+
+> No source code, credentials, or personal information are ever transmitted.  
+> Telemetry is opt-in via usage; there’s no persistent tracking or external identifiers.
+
+---
+
+## 🕵️‍♂️ Privacy & Metrics Summary
+
+**GitOps Manager™** collects limited, anonymous usage metrics to understand adoption and display community activity on [gitopsmanager.io](https://gitopsmanager.io).
+
+**What we publicly display**
+- Aggregate counts of **organizations**, **repositories**, **builds**, and **deploys**  
+- These totals are shown on the website as global usage summaries
+
+**How data is handled**
+- Each organization and repository is represented by an **anonymized hash key**  
+- Hashes cannot be reversed or linked to any identifiable information  
+- Raw telemetry records (hashed only) are stored privately and used solely to compute aggregate totals  
+- Only the aggregated counts are displayed publicly — no raw data is exposed
+
+**What we never collect**
+- No personal data, source code, credentials, or identifiable metadata are ever captured or transmitted
+
+Telemetry is an integral part of the system’s design.  
+It helps measure adoption, guide improvements, and highlight how the community is using these open-source tools.
+
+For privacy or data-related inquiries, please use the **Contact** button on [gitopsmanager.io](https://gitopsmanager.io) to submit a request using a valid corporate email address.
 
 ---
 
@@ -20,35 +85,18 @@ It renders manifest files using **Jinja2-style templating implemented with [Nunj
 | `target_environment` | ✅       | string   | `dev`   | Logical environment (`dev`, `qa`, `prod`). Still required even if `target_cluster` is set, as it controls approvals and environment scoping. |
 | `target_cluster`     | ❌       | string   | `""`    | If set, resolves the cluster **globally across all `env_map` environments** by matching the `cluster` name. If omitted, the cluster is resolved from the given `target_environment` only. |
 | `ref`                | ❌       | string   | `${{ github.ref || github.sha }}` | Git reference (branch, tag, or commit SHA) for source repo checkout |
-| `delete_first`       | ❌       | boolean  | `false` | Delete ArgoCD app(s) before deploying |
+| `delete_first`       | ❌       | boolean  | `false` | Delete ArgoCD app(s) before deploying (**then redeploy**). |
+| `delete_only`        | ❌       | boolean  | `false` | If `true`, the workflow will **only delete ArgoCD apps** for the specified cluster/namespace and clean up their corresponding directories in the CD repo. |
 | `cd_repo`            | ✅       | string   | –       | Continuous deployment repo where templated manifests are committed |
 | `cd_repo_org`        | ✅       | string   | –       | Continuous deployment repo organization |
 | `github_environment` | ❌       | string   | –       | GitHub Environment for approvals and env-scoped secrets |
 
 ---
-> ### 🕵️‍♂️ Privacy & Metrics Summary
->
-> **GitOps Manager** collects limited, anonymous usage metrics to understand adoption and display community activity on [gitopsmanager.io](https://gitopsmanager.io).
->
-> **What we publicly display**
-> - Aggregate counts of **organizations**, **repositories**, **builds**, and **deploys**  
-> - These totals are shown on the website as global usage summaries
->
-> **How data is handled**
-> - Each organization and repository is represented by an **anonymized hash key**  
-> - Hashes cannot be reversed or linked to any identifiable information  
-> - Raw telemetry records (hashed only) are stored privately and used solely to compute aggregate totals  
-> - Only the aggregated counts are displayed publicly — no raw data is exposed
->
-> **What we never collect**
-> - No personal data, source code, credentials, or identifiable metadata are ever captured or transmitted
->
-> Telemetry is an integral part of the system’s design.  
-> It helps measure adoption, guide improvements, and highlight how the community is using these open-source tools.
->
-> For privacy or data-related inquiries, please use the **Contact** button on [gitopsmanager.io](https://gitopsmanager.io) to submit a request using a valid corporate email address.
+> ### 🕵️‍♂️ Additional note
+> The workflow **checks for presence of `ARGOCD_CA_CERT`** and reports its length for debugging purposes.
 
 ---
+
 ### Deployment Modes
 - **Mode A: Single App**
   - `application` (string)  
@@ -115,7 +163,6 @@ If neither is provided, the workflow fails.
 ```
 
 ---
-
 
 ## 🔑 UAMI Mapping for Azure Workload Identity
 
@@ -226,6 +273,8 @@ When `delete_only: true`:
 
 This mode is useful for **cleanly tearing down apps** in both ArgoCD **and** your CD repo, leaving no trace of the app’s manifests.
 
+> 📌 **Telemetry note:** delete-only runs still record a `deploy` event for aggregate usage totals.
+
 ---
 
 #### Example Usage
@@ -247,9 +296,9 @@ jobs:
       CONTINUOUS_DEPLOYMENT_GH_APP_ID: ${{ secrets.CD_GH_APP_ID }}
       CONTINUOUS_DEPLOYMENT_GH_APP_PRIVATE_KEY: ${{ secrets.CD_GH_APP_KEY }}
       ARGOCD_CA_CERT: ${{ secrets.ARGOCD_CA_CERT }}
+```
 
 ---
-
 
 ### ArgoCD / Misc
 | Name                | Required | Type    | Default  | Description |
@@ -278,20 +327,20 @@ jobs:
 
 ## 🔄 Deployment Flow
 
-1. Checkout repos  
-2. Parse `env_map`  
-3. Export UAMI client IDs  
-4. Template manifests with **Nunjucks (Jinja2 style)**  
-5. Copy to CD repo structure  
-6. Patch images  
-7. Build with kustomize  
-8. Upload artifacts  
-9. Commit & push  
-10. Authenticate with ArgoCD  
-11. Delete apps if `delete_first`  
-12. Create apps  
-13. Sync  
-14. Wait for sync (unless skipped)  
+1. 🗳️ Checkout repos  
+2. 🧭 Parse `env_map`  
+3. 🔑 Export UAMI client IDs  
+4. 🧩 Template manifests with **Nunjucks (Jinja2 style)**  
+5. 📁 Copy to CD repo structure  
+6. 🖼️ Patch images  
+7. 🏗️ Build with kustomize  
+8. 📦 Upload artifacts  
+9. 🌿 Commit & push  
+10. 🔐 Authenticate with ArgoCD  
+11. 🗑️ Delete apps if `delete_first`  
+12. 🧱 Create apps  
+13. 🚀 Sync  
+14. ⏳ Wait for sync (unless skipped)  
 
 ---
 
@@ -302,9 +351,12 @@ jobs:
 | [`actions/checkout`](https://github.com/actions/checkout) | `v4` | Checkout source, reusable, and CD repos |
 | [`actions/create-github-app-token`](https://github.com/actions/create-github-app-token) | `v2` | Generate GitHub App token for CD repo access |
 | [`gitopsmanager/detect-cloud`](https://github.com/gitopsmanager/detect-cloud) | `v1` | Detect cloud provider (AWS, Azure, GCP, unknown) |
-| [`actions/github-script`](https://github.com/actions/github-script) | `v7` | Used extensively for JSON parsing, cluster selection, templating, ArgoCD API calls, etc. |
+| [`actions/github-script`](https://github.com/actions/github-script) | `v7` | Used extensively for JSON parsing, templating, and ArgoCD API calls |
 | [`imranismail/setup-kustomize`](https://github.com/imranismail/setup-kustomize) | `v2` | Install kustomize for manifest builds |
 | [`actions/upload-artifact`](https://github.com/actions/upload-artifact) | `v4` | Upload templated manifests and built kustomize manifests |
+
+> 🔒 **Pinning advice:**  
+> Use major tag (`@v2`) for safe auto-updates or commit SHA for full reproducibility.
 
 ---
 
@@ -314,9 +366,12 @@ jobs:
 |---------------|----------|-------|
 | `templated-source-manifests-<cluster>` | Application manifests after **Nunjucks (Jinja2-style) templating** | Shows cluster-specific substitutions and injected UAMI vars |
 | `built-kustomize-manifest-<cluster>`  | Final combined YAML output from `kustomize build` | Ready-to-apply manifests, concatenated with `---` delimiters |
+
+> 📝 No artifacts are uploaded when **`delete_only: true`**.
+
 ---
 
-## 🧪 Example Usage
+## 🧪 Example Usage (Deploy)
 
 ```yaml
 jobs:
@@ -351,12 +406,21 @@ ArgoCD ingress must be reachable at:
 https://${cluster}-argocd-argocd-web-ui.${dns_zone}
 ```
 
+> You can override this by patching the `argocd_conn` step in the workflow if your ingress differs.
+
 ---
 
-## 🔖 Versioning
+## 🔢 Versioning Policy — Official Release
 
-- `@v2` – Stable v2 series  
-- `@v1` – Legacy v1 series  
+Starting with this release, all `v2` versions follow the same **stable tagging model** used across GitOps Manager™ Actions.
+
+| Tag | Moves When | Purpose |
+|------|-------------|----------|
+| **`v2`** | Any new release in the `v2.x.x` series | Always points to the latest stable release (no breaking changes). |
+| **`v2.3`** | New patch within that feature line (e.g. `v2.3.5 → v2.3.6`) | Tracks bug fixes and improvements only — no new required inputs. |
+| **`v2.3.7`** | Never | Fully immutable, reproducible snapshot. |
+
+All tags will now **increment forward permanently** — no re-use or re-tagging of old versions.  
 
 ---
 
