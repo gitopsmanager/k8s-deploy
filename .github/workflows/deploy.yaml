@@ -490,7 +490,6 @@ jobs:
     - name: Generate create.json metadata (per app)
       id: create-json
       uses: actions/github-script@v7
-      working-directory: continuous-deployment
       env:
         CLUSTER: ${{ inputs.cluster }}
         NAMESPACE: ${{ inputs.namespace }}
@@ -502,6 +501,7 @@ jobs:
           const fs = require('fs');
           const path = require('path');
 
+          const workspace = process.env.GITHUB_WORKSPACE;
           const cluster = process.env.CLUSTER;
           const namespace = process.env.NAMESPACE || 'default';
           const apps = JSON.parse(process.env.APPS || '[]');
@@ -516,14 +516,13 @@ jobs:
             return;
           }
 
-          // ✅ Write per-app create.json files
           for (const a of apps) {
-            const outputDir = path.join('continuous-deployment', cluster, namespace, a.name);
+            // 👇 Build absolute path inside the checked-out CD repo
+            const outputDir = path.join(workspace, 'continuous-deployment', cluster, namespace, a.name);
             fs.mkdirSync(outputDir, { recursive: true });
 
-            const outputFile = path.join(outputDir, 'create.json');
             const payload = {
-              namespace: namespace,
+              namespace,
               applications: [
                 {
                   name: a.name,
@@ -533,6 +532,7 @@ jobs:
               ]
             };
 
+            const outputFile = path.join(outputDir, 'create.json');
             fs.writeFileSync(outputFile, JSON.stringify(payload, null, 2));
             core.info(`🧾 Wrote ${outputFile} for ${a.name} → ${a.path}`);
           }
@@ -540,10 +540,11 @@ jobs:
           core.info(`✅ Finished writing create.json for ${apps.length} app(s)`);
 
 
-    - name: Download Nunjucks UMD bundle
-      if: ${{ inputs.delete_only == false }}
-      run: |
-        curl -sSL https://cdnjs.cloudflare.com/ajax/libs/nunjucks/3.2.4/nunjucks.min.js -o nunjucks.js
+
+        - name: Download Nunjucks UMD bundle
+          if: ${{ inputs.delete_only == false }}
+          run: |
+            curl -sSL https://cdnjs.cloudflare.com/ajax/libs/nunjucks/3.2.4/nunjucks.min.js -o nunjucks.js
 
 
     - name: Render manifests with Nunjucks (Jinja2-style)
