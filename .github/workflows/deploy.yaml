@@ -487,60 +487,6 @@ jobs:
           core.setOutput('apps', JSON.stringify(apps));
           core.setOutput('count', String(apps.length));
 
-    - name: Create JSON for cluster restore
-      id: create-json
-      uses: actions/github-script@v7
-      env:
-        # use resolved cluster and namespace from earlier step
-        CLUSTER: ${{ steps.env.outputs.cluster }}
-        NAMESPACE: ${{ steps.env.outputs.namespace || inputs.namespace }}
-        APPS: ${{ steps.apps.outputs.apps }}
-        CD_REPO: ${{ inputs.cd_repo }}
-        CD_REPO_ORG: ${{ inputs.cd_repo_org }}
-      with:
-        script: |
-          const fs = require('fs');
-          const path = require('path');
-
-          const workspace = process.env.GITHUB_WORKSPACE;
-          const cluster = process.env.CLUSTER;
-          const namespace = process.env.NAMESPACE || 'default';
-          const apps = JSON.parse(process.env.APPS || '[]');
-
-          if (!cluster) {
-            core.setFailed("❌ Cluster name not resolved from environment config");
-            return;
-          }
-
-          if (apps.length === 0) {
-            core.warning("⚠️ No applications found — skipping create.json generation");
-            return;
-          }
-
-          for (const a of apps) {
-            // Absolute path inside the checked-out CD repo
-            const outputDir = path.join(workspace, 'continuous-deployment', cluster, namespace, a.name);
-            fs.mkdirSync(outputDir, { recursive: true });
-
-            const payload = {
-              cluster,
-              namespace,
-              applications: [
-                {
-                  name: a.name,
-                  repo: `https://github.com/${process.env.CD_REPO_ORG}/${process.env.CD_REPO}`,
-                  overlay_dir: a.path
-                }
-              ]
-            };
-
-            const outputFile = path.join(outputDir, 'create.json');
-            fs.writeFileSync(outputFile, JSON.stringify(payload, null, 2));
-            core.info(`🧾 Wrote ${outputFile} for ${a.name} → ${a.path}`);
-          }
-
-          core.info(`✅ Finished writing create.json for ${apps.length} app(s)`);
-
 
 
 
@@ -684,6 +630,63 @@ jobs:
 
           core.setOutput('cd_path', cdRoot);
           core.setOutput('cd_path_rel', cdRootRel);
+
+
+    - name: Create JSON for cluster restore
+      id: create-json
+      uses: actions/github-script@v7
+      env:
+        # use resolved cluster and namespace from earlier step
+        CLUSTER: ${{ steps.env.outputs.cluster }}
+        NAMESPACE: ${{ steps.env.outputs.namespace || inputs.namespace }}
+        APPS: ${{ steps.apps.outputs.apps }}
+        CD_REPO: ${{ inputs.cd_repo }}
+        CD_REPO_ORG: ${{ inputs.cd_repo_org }}
+      with:
+        script: |
+          const fs = require('fs');
+          const path = require('path');
+
+          const workspace = process.env.GITHUB_WORKSPACE;
+          const cluster = process.env.CLUSTER;
+          const namespace = process.env.NAMESPACE || 'default';
+          const apps = JSON.parse(process.env.APPS || '[]');
+
+          if (!cluster) {
+            core.setFailed("❌ Cluster name not resolved from environment config");
+            return;
+          }
+
+          if (apps.length === 0) {
+            core.warning("⚠️ No applications found — skipping create.json generation");
+            return;
+          }
+
+          for (const a of apps) {
+            // Absolute path inside the checked-out CD repo
+            const outputDir = path.join(workspace, 'continuous-deployment', cluster, namespace, a.name);
+            fs.mkdirSync(outputDir, { recursive: true });
+
+            const payload = {
+              cluster,
+              namespace,
+              applications: [
+                {
+                  name: a.name,
+                  repo: `https://github.com/${process.env.CD_REPO_ORG}/${process.env.CD_REPO}`,
+                  overlay_dir: a.path
+                }
+              ]
+            };
+
+            const outputFile = path.join(outputDir, 'create.json');
+            fs.writeFileSync(outputFile, JSON.stringify(payload, null, 2));
+            core.info(`🧾 Wrote ${outputFile} for ${a.name} → ${a.path}`);
+          }
+
+          core.info(`✅ Finished writing create.json for ${apps.length} app(s)`);
+
+
 
 
     - name: Setup Kustomize
