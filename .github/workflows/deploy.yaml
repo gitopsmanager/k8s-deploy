@@ -1126,7 +1126,7 @@ jobs:
 
 
     - name: Manage ArgoCD Applications
-      uses: ./reusable/.github/actions/argocd-manage
+      uses: ${{ github.workspace }}/reusable/.github/actions/argocd-manage
       with:
         argocd_auth_token: ${{ inputs.argocd_auth_token }}
         argocd_username: ${{ inputs.argocd_username }}
