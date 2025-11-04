@@ -1126,7 +1126,7 @@ jobs:
 
 
     - name: Manage ArgoCD Applications
-      uses: ../reusable/.github/actions/argocd-manage
+      uses: gitopsmanager/k8s-deploy/.github/actions/argocd-manage@v2.1
       with:
         argocd_auth_token: ${{ inputs.argocd_auth_token }}
         argocd_username: ${{ inputs.argocd_username }}
