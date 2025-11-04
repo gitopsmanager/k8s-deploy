@@ -487,12 +487,13 @@ jobs:
           core.setOutput('apps', JSON.stringify(apps));
           core.setOutput('count', String(apps.length));
 
-    - name: create json for cluster restore
+    - name: Create JSON for cluster restore
       id: create-json
       uses: actions/github-script@v7
       env:
-        CLUSTER: ${{ inputs.cluster }}
-        NAMESPACE: ${{ inputs.namespace }}
+        # use resolved cluster and namespace from earlier step
+        CLUSTER: ${{ steps.env.outputs.cluster }}
+        NAMESPACE: ${{ steps.env.outputs.namespace || inputs.namespace }}
         APPS: ${{ steps.apps.outputs.apps }}
         CD_REPO: ${{ inputs.cd_repo }}
         CD_REPO_ORG: ${{ inputs.cd_repo_org }}
@@ -507,7 +508,7 @@ jobs:
           const apps = JSON.parse(process.env.APPS || '[]');
 
           if (!cluster) {
-            core.setFailed("❌ CLUSTER input is required");
+            core.setFailed("❌ Cluster name not resolved from environment config");
             return;
           }
 
@@ -522,6 +523,7 @@ jobs:
             fs.mkdirSync(outputDir, { recursive: true });
 
             const payload = {
+              cluster,
               namespace,
               applications: [
                 {
