@@ -1126,7 +1126,7 @@ jobs:
 
 
     - name: Manage ArgoCD Applications
-      uses: ./.github/actions/argocd-manage
+      uses: ./reusable/.github/actions/argocd-manage
       with:
         argocd_auth_token: ${{ inputs.argocd_auth_token }}
         argocd_username: ${{ inputs.argocd_username }}
@@ -1141,4 +1141,5 @@ jobs:
         delete_first: ${{ inputs.delete_first }}
         delete_only: ${{ inputs.delete_only }}
         skip_status_check: ${{ inputs.skip_status_check }}
-        no_fail: false        # set to true in restore-cluster workflow
+        no_fail: false
+
