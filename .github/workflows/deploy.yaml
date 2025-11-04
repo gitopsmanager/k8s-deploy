@@ -749,7 +749,7 @@ jobs:
       if: ${{ inputs.debug && inputs.delete_only == false }}
       run: find "${{ steps.copy.outputs.cd_path }}" || echo "Nothing copied!"
 
-   - name: Run kustomize build (concat per app)
+    - name: Run kustomize build (concat per app)
       id: kustomize
       if: ${{ inputs.delete_only == false }}
       uses: actions/github-script@v7
