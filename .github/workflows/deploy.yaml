@@ -424,6 +424,36 @@ jobs:
           core.setOutput("uami_vars", JSON.stringify(exported));
 
 
+    - name: Restore Cluster from Source
+      if: ${{ inputs.ClusterRestoreSource != '' && inputs.ClusterRestoreTarget != '' }}
+      run: |
+        set -euo pipefail
+
+        SRC="${{ inputs.ClusterRestoreSource }}"
+        TGT="${{ inputs.ClusterRestoreTarget }}"
+
+        SRC_DIR="continuous-deploy/$SRC"
+        TGT_DIR="continuous-deploy/$TGT"
+
+        if [ ! -d "$SRC_DIR" ]; then
+          echo "Source directory '$SRC_DIR' does not exist."
+          exit 1
+        fi
+
+        if [ -e "$TGT_DIR" ]; then
+          echo "Target directory '$TGT_DIR' already exists. Aborting."
+          exit 1
+        fi
+
+        echo "Copying $SRC_DIR to $TGT_DIR"
+        cp -r "$SRC_DIR" "$TGT_DIR"
+
+        echo "Replacing occurrences of '$SRC' with '$TGT' in all files under $TGT_DIR"
+        find "$TGT_DIR" -type f -exec sed -i "s/${SRC}/${TGT}/g" {} +
+
+        echo "Cluster '$TGT' created from '$SRC' completed."
+
+
 
 
     # Unify to a single apps[] list for either mode
@@ -943,149 +973,6 @@ jobs:
 
 
 
-    - name: Resolve ArgoCD auth
-      id: resolve_auth
-      env:
-        IN_TOKEN: ${{ inputs.argocd_auth_token }}
-        IN_USER: ${{ inputs.argocd_username }}
-        IN_PASS: ${{ inputs.argocd_password }}
-        SEC_USER: ${{ secrets.ARGOCD_USERNAME }}
-        SEC_PASS: ${{ secrets.ARGOCD_PASSWORD }}
-      run: |
-        set -euo pipefail
-        if [ -n "${IN_TOKEN:-}" ]; then
-          echo "mode=token" >> "$GITHUB_OUTPUT"
-          echo "token=$IN_TOKEN" >> "$GITHUB_OUTPUT"
-        elif [ -n "${IN_USER:-}" ] && [ -n "${IN_PASS:-}" ]; then
-          echo "mode=basic" >> "$GITHUB_OUTPUT"
-          echo "username=$IN_USER" >> "$GITHUB_OUTPUT"
-          echo "password=$IN_PASS" >> "$GITHUB_OUTPUT"
-        elif [ -n "${SEC_USER:-}" ] && [ -n "${SEC_PASS:-}" ]; then
-          echo "mode=basic" >> "$GITHUB_OUTPUT"
-          echo "username=$SEC_USER" >> "$GITHUB_OUTPUT"
-          echo "password=$SEC_PASS" >> "$GITHUB_OUTPUT"
-        else
-          echo "❌ No ArgoCD auth provided."
-          exit 1
-        fi
-
-    - name: Debug ARGOCD_CA_CERT presence
-      run: |
-        if [ -z "${ARGOCD_CA_CERT}" ]; then
-          echo "❌ ARGOCD_CA_CERT is not set"
-        else
-          echo "✅ ARGOCD_CA_CERT is set (length: ${#ARGOCD_CA_CERT})"
-        fi
-      shell: bash
-      env:
-        ARGOCD_CA_CERT: ${{ secrets.ARGOCD_CA_CERT }}
-
-
-
-    - name: Set ArgoCD connection (token & URLs)
-      id: argocd_conn
-      uses: actions/github-script@v7
-      env:
-        MODE: ${{ steps.resolve_auth.outputs.mode }}
-        TOKEN: ${{ steps.resolve_auth.outputs.token }}
-        USERNAME: ${{ steps.resolve_auth.outputs.username }}
-        PASSWORD: ${{ steps.resolve_auth.outputs.password }}
-        ARGOCD_CA_CERT: ${{ secrets.ARGOCD_CA_CERT }}
-        CLUSTER: ${{ steps.env.outputs.cluster }}
-        DNS_ZONE: ${{ steps.env.outputs.dns_zone }}
-        INSECURE_ARGO: ${{ inputs.insecure_argo }}
-      with:
-        script: |
-          const { execSync } = require('child_process');
-          const fs = require('fs');
-          const cluster = process.env.CLUSTER;
-          const dnsZone = process.env.DNS_ZONE;
-          const argocdUrl = `https://${cluster}-argocd-argocd-web-ui.${dnsZone}`;
-
-          // TLS flags for curl
-          let curlSslFlags = "";
-          if (String(process.env.INSECURE_ARGO) === "true") {
-            curlSslFlags = "-k";
-            core.warning("⚠️ Using insecure connection (curl -k).");
-          } else if (process.env.ARGOCD_CA_CERT) {
-            let cert = process.env.ARGOCD_CA_CERT;
-            if (cert.includes('\\n')) cert = cert.replace(/\\n/g, '\n');
-            fs.writeFileSync('/tmp/argocd-ca.crt', cert);
-            curlSslFlags = "--cacert /tmp/argocd-ca.crt";
-            core.info("✅ Using provided CA cert with curl.");
-          }
-
-          let finalToken = process.env.TOKEN;
-
-          if (process.env.MODE !== "token") {
-            const body = JSON.stringify({ username: process.env.USERNAME, password: process.env.PASSWORD });
-            const cmd = `curl -s ${curlSslFlags} -X POST "${argocdUrl}/api/v1/session" -H "Content-Type: application/json" -d '${body.replace(/'/g,"'\\''")}'`;
-            core.info(`🔐 Running: curl ... (hidden password)`);
-            const resp = execSync(cmd).toString();
-            try {
-              finalToken = JSON.parse(resp).token;
-            } catch {
-              core.error(`Response: ${resp}`);
-              core.setFailed("❌ Failed to parse ArgoCD session response");
-              return;
-            }
-          }
-
-          if (!finalToken) {
-            core.setFailed("❌ Failed to obtain ArgoCD token.");
-            return;
-          }
-
-          core.info("✅ Successfully obtained ArgoCD token.");
-          core.setOutput('argocd_url', argocdUrl);
-          core.setOutput('curl_ssl_flags', curlSslFlags);
-          core.setOutput('token', finalToken);
-
-    - name: Delete ArgoCD apps (per app)
-      if: ${{ inputs.delete_first || inputs.delete_only }}
-      uses: actions/github-script@v7
-      env:
-        APPS: ${{ steps.apps.outputs.apps }}
-        ARGOCD_URL: ${{ steps.argocd_conn.outputs.argocd_url }}
-        ARGOCD_TOKEN: ${{ steps.argocd_conn.outputs.token }}
-        CURL_SSL_FLAGS: ${{ steps.argocd_conn.outputs.curl_ssl_flags }}
-        NAMESPACE: ${{ inputs.namespace }}
-      with:
-        script: |
-          const { execSync } = require('child_process');
-          const apps = JSON.parse(process.env.APPS || '[]');
-
-          function httpCode(cmd) {
-            return parseInt(execSync(`${cmd} -o /dev/null -w "%{http_code}"`).toString().trim(), 10);
-          }
-
-          for (const app of apps) {
-            const appName = `${process.env.NAMESPACE}-${app.name}`;
-            const appUrl = `${process.env.ARGOCD_URL}/api/v1/applications/${appName}`;
-            core.info(`🗑️ Deleting ArgoCD Application: ${appName}`);
-
-            const delCmd = `curl -s ${process.env.CURL_SSL_FLAGS} -X DELETE "${appUrl}" -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" -H "Content-Type: application/json"`;
-            const code = httpCode(delCmd);
-            core.info(`Delete response HTTP ${code}`);
-
-            if (![200, 202, 204].includes(code)) {
-              core.setFailed(`❌ Failed to delete ${appName}: HTTP ${code}`);
-              return;
-            }
-
-            const timeout = Date.now() + 120000;
-            while (Date.now() < timeout) {
-              const checkCmd = `curl -s ${process.env.CURL_SSL_FLAGS} -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" "${appUrl}"`;
-              const checkCode = httpCode(checkCmd);
-              if (checkCode === 403) {
-                core.info(`✅ ${appName} deleted (HTTP 403)`);
-                break;
-              }
-              core.info(`⏳ Still deleting ${appName} (HTTP ${checkCode})...`);
-              await new Promise(r => setTimeout(r, 5000));
-            }
-          }
-
     - name: Clear apps from CD repo (delete_only mode)
       if: ${{ inputs.delete_only }}
       uses: actions/github-script@v7
@@ -1238,244 +1125,20 @@ jobs:
         APP_NAME: ${{ fromJSON(steps.apps.outputs.apps)[0].name }}
 
 
-
-
-    - name: Check or create ArgoCD applications (per app)
-      uses: actions/github-script@v7
-      if: ${{ inputs.delete_only == false }}
-      env:
-        APPS: ${{ steps.apps.outputs.apps }}
-        CD_PATH_REL: ${{ steps.copy.outputs.cd_path_rel }}
-        OVERLAY_DIR: ${{ inputs.overlay_dir }}
-        CD_REPO: ${{ inputs.cd_repo }}
-        CD_REPO_ORG: ${{ inputs.cd_repo_org }}
-        ARGOCD_URL: ${{ steps.argocd_conn.outputs.argocd_url }}
-        ARGOCD_TOKEN: ${{ steps.argocd_conn.outputs.token }}
-        CURL_SSL_FLAGS: ${{ steps.argocd_conn.outputs.curl_ssl_flags }}
-        NAMESPACE: ${{ inputs.namespace }}
+    - name: Manage ArgoCD Applications
+      uses: ./.github/actions/argocd-manage
       with:
-        script: |
-          const { execSync } = require('child_process');
-          const fs = require('fs');
-          const path = require('path');
-          const nunjucks = require('./nunjucks.js');
-          const apps = JSON.parse(process.env.APPS || '[]');
-
-          function curlJson(url) {
-            return execSync(`curl -s ${process.env.CURL_SSL_FLAGS} -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" "${url}"`).toString();
-          }
-
-          function deleteApp(appUrl, appName) {
-            execSync(`curl -s -o /dev/null -w "%{http_code}" ${process.env.CURL_SSL_FLAGS} -X DELETE "${appUrl}" -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" -H "Content-Type: application/json"`);
-            const timeout = Date.now() + 120000;
-            while (Date.now() < timeout) {
-              const code = parseInt(execSync(`curl -s -o /dev/null -w "%{http_code}" ${process.env.CURL_SSL_FLAGS} -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" "${appUrl}"`).toString());
-              if (code === 403) return true;
-              new Promise(r => setTimeout(r, 5000));
-            }
-            return false;
-          }
-
-          for (const app of apps) {
-            const appName = `${process.env.NAMESPACE}-${app.name}`;
-            const statusUrl = `${process.env.ARGOCD_URL}/api/v1/applications/${appName}`;
-            const basePath = path.join(process.env.CD_PATH_REL, app.name, 'overlays', process.env.OVERLAY_DIR);
-
-            const status = curlJson(statusUrl);
-            if (status) {
-              try {
-                const existing = JSON.parse(status);
-                if (existing?.spec?.source?.path !== basePath) {
-                  core.warning(`⚠️ Path mismatch for ${appName}, recreating`);
-                  deleteApp(statusUrl, appName);
-                } else {
-                  core.info(`✅ Argo app ${appName} exists with correct path.`);
-                  continue;
-                }
-              } catch {
-                // treat as non-200
-              }
-            }
-
-            const template = fs.readFileSync('reusable/templates/argocd-app-template-v6.json', 'utf8');
-            const rendered = nunjucks.renderString(template, {
-              APP_NAME: appName,
-              NAMESPACE: process.env.NAMESPACE,
-              CD_REPO: process.env.CD_REPO,
-              CD_REPO_ORG: process.env.CD_REPO_ORG,
-              CD_PATH: basePath
-            });
-
-            execSync(`curl -s ${process.env.CURL_SSL_FLAGS} -X POST "${process.env.ARGOCD_URL}/api/v1/applications" -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" -H "Content-Type: application/json" -d '${rendered.replace(/'/g,"'\\''")}'`);
-            core.info(`✅ Created Argo app ${appName}`);
-          }
-
-
-    - name: Sync ArgoCD apps (per app)
-      id: sync
-      if: ${{ inputs.delete_only == false }}
-      uses: actions/github-script@v7
-      env:
-        APPS: ${{ steps.apps.outputs.apps }}
-        ARGOCD_URL: ${{ steps.argocd_conn.outputs.argocd_url }}
-        ARGOCD_TOKEN: ${{ steps.argocd_conn.outputs.token }}
-        CURL_SSL_FLAGS: ${{ steps.argocd_conn.outputs.curl_ssl_flags }}
-        NAMESPACE: ${{ inputs.namespace }}
-      with:
-        script: |
-          const { execSync } = require('child_process');
-          const apps = JSON.parse(process.env.APPS || '[]');
-          const baselines = {};
-
-          for (const app of apps) {
-            const appName = `${process.env.NAMESPACE}-${app.name}`;
-            const statusUrl = `${process.env.ARGOCD_URL}/api/v1/applications/${appName}`;
-
-            let baseline = 0;
-            try {
-              const status = execSync(`curl -s ${process.env.CURL_SSL_FLAGS} -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" "${statusUrl}"`).toString();
-              const json = JSON.parse(status);
-              if (json?.status?.operationState?.startedAt) {
-                baseline = new Date(json.status.operationState.startedAt).getTime();
-              }
-            } catch {}
-            baselines[appName] = baseline;
-
-            // 🧨 Force prune sync
-            execSync(`curl -s ${process.env.CURL_SSL_FLAGS} -X POST "${statusUrl}/sync" \
-              -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" \
-              -H "Content-Type: application/json" \
-              -d '{"prune": true, "force": true}'`);
-
-            core.info(`🚀 Force-prune sync triggered: ${appName}`);
-          }
-
-          core.setOutput('baselines', JSON.stringify(baselines));
-
-
-    - name: Wait for ArgoCD sync (per app)
-      if: ${{ inputs.skip_status_check == false && inputs.delete_only == false }}
-      uses: actions/github-script@v7
-      env:
-        APPS: ${{ steps.apps.outputs.apps }}
-        ARGOCD_URL: ${{ steps.argocd_conn.outputs.argocd_url }}
-        ARGOCD_TOKEN: ${{ steps.argocd_conn.outputs.token }}
-        CURL_SSL_FLAGS: ${{ steps.argocd_conn.outputs.curl_ssl_flags }}
-        NAMESPACE: ${{ inputs.namespace }}
-        BASELINES: ${{ steps.sync.outputs.baselines }}
-      with:
-        script: |
-          const { execSync } = require('child_process');
-          const apps = JSON.parse(process.env.APPS || '[]');
-          const baselines = JSON.parse(process.env.BASELINES || '{}');
-
-          // Helper: determine if all resources are synced
-          function allResourcesSynced(json) {
-            const results =
-              json?.status?.operationState?.syncResult?.resources ||
-              json?.status?.operationState?.results ||
-              [];
-            return (
-              Array.isArray(results) &&
-              results.length > 0 &&
-              results.every(r => r.status === 'Synced' || r.hookPhase === 'Succeeded')
-            );
-          }
-
-          for (const app of apps) {
-            const appName = `${process.env.NAMESPACE}-${app.name}`;
-            const statusUrl = `${process.env.ARGOCD_URL}/api/v1/applications/${appName}`;
-            const baseline = baselines[appName] || 0;
-            core.startGroup(`⏳ Waiting for sync of ${appName}, baseline=${baseline}`);
-
-            let ok = false;
-            let lastPhase, lastSync, lastHealth;
-            let consecutiveErrors = 0;
-
-            for (let i = 0; i < 36; i++) {
-              try {
-                const status = execSync(
-                  `curl -s ${process.env.CURL_SSL_FLAGS} -H "Authorization: Bearer ${process.env.ARGOCD_TOKEN}" "${statusUrl}"`
-                ).toString();
-                const json = JSON.parse(status);
-
-                const op = json?.status?.operationState;
-                lastPhase = op?.phase;
-                lastSync = json?.status?.sync?.status;
-                lastHealth = json?.status?.health?.status;
-
-                core.info(
-                  `🔄 Iteration ${i + 1}/36 for ${appName}: phase=${lastPhase}, sync=${lastSync}, health=${lastHealth}`
-                );
-
-                consecutiveErrors = 0; // reset error counter if fetch succeeded
-
-                // Immediate fail conditions
-                if (lastPhase === 'Error' || lastSync === 'Error' || lastSync === 'Failed') {
-                  core.setFailed(`❌ Sync failed for ${appName} (phase=${lastPhase}, sync=${lastSync})`);
-                  return;
-                }
-
-                const startedAt = op?.startedAt ? new Date(op.startedAt).getTime() : 0;
-                const allSynced = allResourcesSynced(json);
-
-                // Case 1: new operation started after baseline
-                if (startedAt > baseline) {
-                  if (lastHealth === 'Degraded') {
-                    core.setFailed(`❌ ${appName} is Synced but health=Degraded.`);
-                    return;
-                  }
-
-                  // Standard success condition
-                  if (lastPhase === 'Succeeded' && lastSync === 'Synced' && lastHealth === 'Healthy') {
-                    core.info(`✅ ${appName} synced after baseline and is Healthy.`);
-                    ok = true;
-                    break;
-                  }
-
-                  // New condition: All resources synced, app healthy
-                  else if (allSynced && lastHealth === 'Healthy') {
-                    core.info(`✅ ${appName} has all synced results and is Healthy.`);
-                    ok = true;
-                    break;
-                  }
-
-                  // Waiting state
-                  else if (lastSync === 'Synced') {
-                    core.info(`⏳ ${appName} is Synced but health=${lastHealth} → waiting for Healthy...`);
-                  }
-                }
-
-                // Case 2: no new operation, but app is already good
-                if (startedAt <= baseline) {
-                  if (lastSync === 'Synced' && lastHealth === 'Healthy') {
-                    core.info(`✅ ${appName} was already Synced and Healthy before baseline.`);
-                    ok = true;
-                    break;
-                  }
-                }
-              } catch (err) {
-                consecutiveErrors++;
-                if (consecutiveErrors > 3) {
-                  core.setFailed(
-                    `❌ Failed to fetch status for ${appName} after ${consecutiveErrors} attempts: ${err.message}`
-                  );
-                  return;
-                } else {
-                  core.warning(
-                    `⚠️ Failed to fetch status for ${appName} (attempt ${consecutiveErrors}): ${err.message}`
-                  );
-                }
-              }
-
-              await new Promise((r) => setTimeout(r, 10000));
-            }
-
-            if (!ok) {
-              core.setFailed(
-                `❌ Sync did not complete in time for ${appName} (last phase=${lastPhase}, sync=${lastSync}, health=${lastHealth})`
-              );
-            }
-
-            core.endGroup();
-          }
+        argocd_auth_token: ${{ inputs.argocd_auth_token }}
+        argocd_username: ${{ inputs.argocd_username }}
+        argocd_password: ${{ inputs.argocd_password }}
+        insecure_argo: ${{ inputs.insecure_argo }}
+        argocd_ca_cert: ${{ secrets.ARGOCD_CA_CERT }}
+        namespace: ${{ inputs.namespace }}
+        cd_repo: ${{ inputs.cd_repo }}
+        cd_repo_org: ${{ inputs.cd_repo_org }}
+        overlay_dir: ${{ inputs.overlay_dir }}
+        apps: ${{ steps.apps.outputs.apps }}
+        delete_first: ${{ inputs.delete_first }}
+        delete_only: ${{ inputs.delete_only }}
+        skip_status_check: ${{ inputs.skip_status_check }}
+        no_fail: false        # set to true in restore-cluster workflow
