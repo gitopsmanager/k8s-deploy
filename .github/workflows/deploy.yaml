@@ -798,13 +798,18 @@ jobs:
 
 
  
+    - name: Construct ArgoCD URL
+      id: build_argo_url
+      run: |
+        echo "url=https://${{ steps.env.outputs.cluster }}-argocd-argocd-web-ui.${{ steps.env.outputs.dns_zone }}" >> $GITHUB_OUTPUT
 
     - name: Manage ArgoCD Applications
       uses: gitopsmanager/ArgoCD-Manage-Applications@main
       with:
+        argocd_url: ${{ steps.build_argo_url.outputs.url }}
         argocd_auth_token: ${{ inputs.argocd_auth_token }}
-        argocd_username: ${{ secrets.ARGOCD_USERNAME }}
-        argocd_password: ${{ secrets.ARGOCD_PASSWORD }}
+        argocd_username: ${{ inputs.argocd_username }}
+        argocd_password: ${{ inputs.argocd_password }}
         insecure_argo: ${{ inputs.insecure_argo }}
         argocd_ca_cert: ${{ secrets.ARGOCD_CA_CERT }}
         namespace: ${{ inputs.namespace }}
@@ -816,6 +821,7 @@ jobs:
         delete_only: ${{ inputs.delete_only }}
         skip_status_check: ${{ inputs.skip_status_check }}
         no_fail: false
+
 
 
 
