@@ -825,7 +825,6 @@ jobs:
         delete_first: ${{ inputs.delete_first }}
         delete_only: ${{ inputs.delete_only }}
         skip_status_check: ${{ inputs.skip_status_check }}
-        no_fail: false
 
 
 
