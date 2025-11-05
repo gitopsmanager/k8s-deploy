@@ -424,36 +424,6 @@ jobs:
           core.setOutput("uami_vars", JSON.stringify(exported));
 
 
-    - name: Restore Cluster from Source
-      if: ${{ inputs.ClusterRestoreSource != '' && inputs.ClusterRestoreTarget != '' }}
-      run: |
-        set -euo pipefail
-
-        SRC="${{ inputs.ClusterRestoreSource }}"
-        TGT="${{ inputs.ClusterRestoreTarget }}"
-
-        SRC_DIR="continuous-deploy/$SRC"
-        TGT_DIR="continuous-deploy/$TGT"
-
-        if [ ! -d "$SRC_DIR" ]; then
-          echo "Source directory '$SRC_DIR' does not exist."
-          exit 1
-        fi
-
-        if [ -e "$TGT_DIR" ]; then
-          echo "Target directory '$TGT_DIR' already exists. Aborting."
-          exit 1
-        fi
-
-        echo "Copying $SRC_DIR to $TGT_DIR"
-        cp -r "$SRC_DIR" "$TGT_DIR"
-
-        echo "Replacing occurrences of '$SRC' with '$TGT' in all files under $TGT_DIR"
-        find "$TGT_DIR" -type f -exec sed -i "s/${SRC}/${TGT}/g" {} +
-
-        echo "Cluster '$TGT' created from '$SRC' completed."
-
-
 
 
     # Unify to a single apps[] list for either mode
@@ -516,7 +486,6 @@ jobs:
 
           core.setOutput('apps', JSON.stringify(apps));
           core.setOutput('count', String(apps.length));
-
 
 
 
@@ -661,7 +630,6 @@ jobs:
           core.setOutput('cd_path', cdRoot);
           core.setOutput('cd_path_rel', cdRootRel);
 
-
     - name: Create JSON for cluster restore
       id: create-json
       uses: actions/github-script@v7
@@ -715,9 +683,6 @@ jobs:
           }
 
           core.info(`✅ Finished writing create.json for ${apps.length} app(s)`);
-
-
-
 
     - name: Setup Kustomize
       if: ${{ inputs.delete_only == false }}
@@ -811,322 +776,31 @@ jobs:
           return outFile;
 
 
-
     - name: Upload built manifest as artifact
       if: ${{ always() && inputs.delete_only == false }}
       uses: actions/upload-artifact@v4
       with:
         name: built-kustomize-manifest-${{ steps.env.outputs.cluster }}-${{ fromJSON(steps.apps.outputs.apps)[0].name }}
-        path: build-output.yaml
+        path: build-output-${{ fromJSON(steps.apps.outputs.apps)[0].name }}.yaml
 
 
-
-    - name: Commit and push to temp branch
-      id: commit_deploy
-      if: ${{ inputs.delete_only == false }}
-      run: |
-        set -euo pipefail
-        cd continuous-deployment
-
-        echo "🔎 Debug: Current working directory = $(pwd)"
-        git remote -v
-
-        git config user.name "k8s-deploy"
-        git config user.email "actions@gitopsmanager.com"
-
-        echo "🔎 Debug: Adding files from: ${{ steps.copy.outputs.cd_path_rel }}/"
-        ls -la "${{ steps.copy.outputs.cd_path_rel }}/" || echo "⚠️ Directory not found"
-
-        git add -A "${{ steps.copy.outputs.cd_path_rel }}/"
-
-        echo "🔎 Debug: Status after staging:"
-        git status --short || true
-        git diff --cached --stat || true
-
-        if git diff --cached --quiet; then
-          echo "⚠️ No changes detected — creating empty commit"
-          git commit --allow-empty -m "No-op deploy commit for ${{ fromJSON(steps.apps.outputs.apps)[0].name }} at $(date -u)"
-        else
-          git commit -m "Deploy to ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} for ${{ fromJSON(steps.apps.outputs.apps)[0].name }}"
-        fi
-
-        branch="deploy-${{ steps.env.outputs.cluster }}-${{ inputs.namespace }}-${{ fromJSON(steps.apps.outputs.apps)[0].name }}-$(date +%s)"
-        echo "🔎 Debug: Branch to push = $branch"
-
-        git log -1 --oneline
-
-        git push --verbose origin HEAD:"$branch" || { echo "❌ git push failed"; exit 1; }
-
-        git ls-remote origin "refs/heads/$branch" || echo "⚠️ Branch not found on remote"
-
-        echo "branch=$branch" >> "$GITHUB_OUTPUT"
-      env:
-        GIT_TOKEN: ${{ steps.generate_token.outputs.token }}
-
-
-    - name: Simple retrying API-based squash merge (deploy)
-      if: ${{ inputs.delete_only == false }}
-      uses: actions/github-script@v7
+    - name: Commit and squash-merge changes
+      uses: gitopsmanager/Auto-Commit-Squash-Merge@main
       with:
-        github-token: ${{ steps.generate_token.outputs.token }}
-        script: |
-          const owner = process.env.CD_REPO_ORG;
-          const repo = process.env.CD_REPO;
-          const branch = process.env.BRANCH;
-          const appName = process.env.APP_NAME;
-
-          async function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-          const fixedRetries = 10;   // 2s interval
-          const randomRetries = 20;  // 1–7.5s randomized
-          const maxRetries = fixedRetries + randomRetries;
-          let prNumber = null;
-          let merged = false;
-
-          try {
-            // --- Detect base branch ---
-            const { data: repoInfo } = await github.rest.repos.get({ owner, repo });
-            const baseBranch = repoInfo.default_branch;
-            core.info(`ℹ️ Default branch = ${baseBranch}`);
-
-            // --- Create PR ---
-            const { data: pr } = await github.rest.pulls.create({
-              owner,
-              repo,
-              head: branch,
-              base: baseBranch,
-              title: `Deploy ${appName} to ${process.env.CLUSTER}/${process.env.NAMESPACE}`,
-              body: "Automated deployment update."
-            });
-            prNumber = pr.number;
-            core.info(`✅ Opened PR #${pr.number}`);
-
-            // --- Attempt merge loop ---
-            for (let attempt = 1; attempt <= maxRetries; attempt++) {
-              try {
-                await github.rest.pulls.merge({
-                  owner,
-                  repo,
-                  pull_number: pr.number,
-                  merge_method: "squash"
-                });
-                core.info(`✅ Squash-merged PR #${pr.number} on attempt ${attempt}`);
-                merged = true;
-                break;
-              } catch (err) {
-                const msg = err.message || "";
-                core.warning(`⚠️ Merge attempt ${attempt} failed: ${msg}`);
-
-                // Hard conflict — same-file edits — fail immediately
-                if (/conflict|cannot.*merge.*due to conflicts/i.test(msg)) {
-                  core.setFailed(`❌ Real merge conflict detected for PR #${pr.number}.`);
-                  break;
-                }
-
-                // Otherwise, retry (transient base-modified/unknown state)
-                if (attempt <= fixedRetries) {
-                  await wait(2000); // first 10 tries = fixed 2s
-                } else {
-                  const delay = 1000 + Math.random() * 6500; // 1–7.5s
-                  core.info(`⏳ Retrying in ${(delay / 1000).toFixed(1)}s...`);
-                  await wait(delay);
-                }
-              }
-            }
-
-            if (!merged) {
-              core.setFailed(`❌ Could not squash-merge PR #${pr.number} after ${maxRetries} attempts.`);
-            }
-
-          } catch (err) {
-            core.setFailed(`❌ Error during deploy PR merge process: ${err.message || err}`);
-          } finally {
-            // --- Always cleanup ---
-            if (prNumber) {
-              if (!merged) {
-                core.info(`🧹 Cleanup: leaving PR #${prNumber} open as it failed and deleting branch '${branch}'...`);
-              }
-              // --- Guard protected branches from deletion ---
-              const protectedBranches = ["main", "master"];
-              if (protectedBranches.includes(branch)) {
-                core.warning(`🚫 Skipping deletion of protected branch '${branch}'.`);
-              } else {
-                try {
-                  await github.rest.git.deleteRef({
-                    owner, repo, ref: `heads/${branch}`
-                  });
-                  core.info(`🗑️ Deleted branch '${branch}'.`);
-                } catch (e) {
-                  core.warning(`⚠️ Could not delete branch '${branch}': ${e.message}`);
-                }
-              }
-            }
-          }
-      env:
-        CD_REPO_ORG: ${{ inputs.cd_repo_org }}
-        CD_REPO: ${{ inputs.cd_repo }}
-        BRANCH: ${{ steps.commit_deploy.outputs.branch }}
-        CLUSTER: ${{ steps.env.outputs.cluster }}
-        NAMESPACE: ${{ inputs.namespace }}
-        APP_NAME: ${{ fromJSON(steps.apps.outputs.apps)[0].name }}
+        token: ${{ steps.generate_token.outputs.token }}
+        repo_owner: ${{ inputs.cd_repo_org }}
+        repo_name: ${{ inputs.cd_repo }}
+        namespace: ${{ inputs.namespace }}
+        cluster: ${{ steps.env.outputs.cluster }}
+        app_name: ${{ fromJSON(steps.apps.outputs.apps)[0].name }}
+        repo_path_rel: ${{ steps.copy.outputs.cd_path_rel }}
+        delete_only: ${{ inputs.delete_only }}
 
 
-
-
-    - name: Clear apps from CD repo (delete_only mode)
-      if: ${{ inputs.delete_only }}
-      uses: actions/github-script@v7
-      env:
-        CD_PATH_REL: ${{ steps.cdroot.outputs.cd_root }}
-        APPS: ${{ steps.apps.outputs.apps }}
-      with:
-        script: |
-          const fs = require('fs');
-          const path = require('path');
-          const { execSync } = require('child_process');
-
-          const apps = JSON.parse(process.env.APPS || '[]');
-          const cdRootRel = process.env.CD_PATH_REL;
-
-          for (const app of apps) {
-            const appDir = path.join('continuous-deployment', cdRootRel, app.name);
-            if (fs.existsSync(appDir)) {
-              core.info(`🗑️ Removing app directory: ${appDir}`);
-              execSync(`rm -rf "${appDir}"`);
-            } else {
-              core.info(`⚠️ Directory not found for app: ${app.name}`);
-            }
-          }
-
-          core.setOutput('cd_path_rel', cdRootRel);
-
-    - name: Commit and push deletions to temp branch
-      id: commit_delete
-      if: ${{ inputs.delete_only }}
-      run: |
-        set -euo pipefail
-        cd continuous-deployment
-
-        echo "🔎 Debug: Current working directory = $(pwd)"
-        git remote -v
-
-        git config user.name "k8s-deploy"
-        git config user.email "actions@gitopsmanager.com"
-
-        echo "Staging deletions in: ${{ steps.cdroot.outputs.cd_root }}/"
-        git rm -r "${{ steps.cdroot.outputs.cd_root }}/" 2>/dev/null || true
-
-        echo "🔎 Debug: Status after staging:"
-        git status --short || true
-        git diff --cached --stat || true
-
-        if git diff --cached --quiet; then
-          echo "⚠️ No deletions detected — creating empty commit"
-          git commit --allow-empty -m "No-op delete commit for ${{ fromJSON(steps.apps.outputs.apps)[0].name }} at $(date -u)"
-        else
-          git commit -m "Delete apps in ${{ steps.env.outputs.cluster }}/${{ inputs.namespace }} for ${{ fromJSON(steps.apps.outputs.apps)[0].name }} (delete_only mode)"
-        fi
-
-        branch="delete-${{ steps.env.outputs.cluster }}-${{ inputs.namespace }}-${{ fromJSON(steps.apps.outputs.apps)[0].name }}-$(date +%s)"
-        echo "🔎 Debug: Branch to push = $branch"
-
-        git log -1 --oneline
-
-        git push --verbose origin HEAD:"$branch" || { echo "❌ git push failed"; exit 1; }
-
-        git ls-remote origin "refs/heads/$branch" || echo "⚠️ Branch not found on remote"
-
-        echo "branch=$branch" >> "$GITHUB_OUTPUT"
-      env:
-        GIT_TOKEN: ${{ steps.generate_token.outputs.token }}
-
-
-    - name: Create and squash-merge PR (delete-only)
-      if: ${{ inputs.delete_only }}
-      uses: actions/github-script@v7
-      with:
-        github-token: ${{ steps.generate_token.outputs.token }}
-        script: |
-          const owner = process.env.CD_REPO_ORG;
-          const repo = process.env.CD_REPO;
-          const branch = process.env.BRANCH;
-          const appName = process.env.APP_NAME;
-
-          // Detect default branch dynamically
-          const { data: repoInfo } = await github.rest.repos.get({ owner, repo });
-          const baseBranch = repoInfo.default_branch;
-          core.info(`ℹ️ Default branch for ${owner}/${repo} = ${baseBranch}`);
-
-          // Create PR
-          const { data: pr } = await github.rest.pulls.create({
-            owner,
-            repo,
-            head: branch,
-            base: baseBranch,
-            title: `Delete ${appName} in ${process.env.CLUSTER}/${process.env.NAMESPACE}`,
-            body: "Automated delete-only deployment update."
-          });
-          core.info(`✅ Opened delete-only PR #${pr.number}`);
-
-          // Poll until mergeable state is computed
-          let mergeable = null;
-          let mergeableState = null;
-          for (let i = 0; i < 10; i++) {
-            const { data: prStatus } = await github.rest.pulls.get({
-              owner,
-              repo,
-              pull_number: pr.number
-            });
-            mergeable = prStatus.mergeable;
-            mergeableState = prStatus.mergeable_state;
-            core.info(`ℹ️ Attempt ${i+1}: mergeable=${mergeable}, state=${mergeableState}`);
-            if (mergeable !== null) break;
-            await new Promise(r => setTimeout(r, 2000));
-          }
-
-          if (mergeable === false) {
-            core.setFailed(`❌ PR #${pr.number} is not mergeable (state=${mergeableState}).`);
-          } else if (mergeable === null) {
-            core.setFailed(`❌ PR #${pr.number} mergeability never resolved.`);
-          } else {
-            // 🔁 Retry loop for transient "base modified" errors
-            const maxRetries = 10;
-            let merged = false;
-            for (let i = 0; i < maxRetries; i++) {
-              try {
-                await github.rest.pulls.merge({
-                  owner,
-                  repo,
-                  pull_number: pr.number,
-                  merge_method: "squash"
-                });
-                core.info(`✅ Squash-merged delete-only PR #${pr.number} on attempt ${i+1}`);
-                merged = true;
-                break;
-              } catch (err) {
-                if (err.message && err.message.includes("Base branch was modified")) {
-                  core.warning(`⚠️ Attempt ${i+1}: base branch changed, retrying in 2s...`);
-                  await new Promise(r => setTimeout(r, 2000));
-                  continue;
-                }
-                throw err; // unexpected failure
-              }
-            }
-            if (!merged) {
-              core.setFailed(`❌ Could not squash-merge delete-only PR #${pr.number} after ${maxRetries} retries`);
-            }
-          }
-      env:
-        CD_REPO_ORG: ${{ inputs.cd_repo_org }}
-        CD_REPO: ${{ inputs.cd_repo }}
-        BRANCH: ${{ steps.commit_delete.outputs.branch }}
-        CLUSTER: ${{ steps.env.outputs.cluster }}
-        NAMESPACE: ${{ inputs.namespace }}
-        APP_NAME: ${{ fromJSON(steps.apps.outputs.apps)[0].name }}
-
+ 
 
     - name: Manage ArgoCD Applications
-      uses: gitopsmanager/k8s-deploy/.github/actions/argocd-manage@v2.1
+      uses: gitopsmanager/ArgoCD-Manage-Applications@main
       with:
         argocd_auth_token: ${{ inputs.argocd_auth_token }}
         argocd_username: ${{ inputs.argocd_username }}
@@ -1142,4 +816,5 @@ jobs:
         delete_only: ${{ inputs.delete_only }}
         skip_status_check: ${{ inputs.skip_status_check }}
         no_fail: false
+
 
