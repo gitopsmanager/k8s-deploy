@@ -89,8 +89,8 @@ on:
           { "name" => application, "images" => image_base_names[], "path" => deploy_path }
           Example:
           [
-            {"name":"app1","images":["repo/app1","repo/sidecar"],"path":"services/app1/overlays/prod"},
-            {"name":"app2","images":["repo/app2"],"path":"apps/app2/overlays/prod"}
+            {"name":"app1","images":["repo/app1","repo/sidecar"],"path":"services/app1"},
+            {"name":"app2","images":["repo/app2"],"path":"apps/app2"}
           ]
         required: false
         type: string
@@ -634,12 +634,12 @@ jobs:
       id: create-json
       uses: actions/github-script@v7
       env:
-        # use resolved cluster and namespace from earlier step
         CLUSTER: ${{ steps.env.outputs.cluster }}
         NAMESPACE: ${{ steps.env.outputs.namespace || inputs.namespace }}
         APPS: ${{ steps.apps.outputs.apps }}
         CD_REPO: ${{ inputs.cd_repo }}
         CD_REPO_ORG: ${{ inputs.cd_repo_org }}
+        OVERLAY_DIR: ${{ inputs.overlay_dir }}
       with:
         script: |
           const fs = require('fs');
@@ -648,6 +648,7 @@ jobs:
           const workspace = process.env.GITHUB_WORKSPACE;
           const cluster = process.env.CLUSTER;
           const namespace = process.env.NAMESPACE || 'default';
+          const overlayDir = (process.env.OVERLAY_DIR || '').trim();
           const apps = JSON.parse(process.env.APPS || '[]');
 
           if (!cluster) {
@@ -661,28 +662,31 @@ jobs:
           }
 
           for (const a of apps) {
-            // Absolute path inside the checked-out CD repo
+            // Keep same file location (per app)
             const outputDir = path.join(workspace, 'continuous-deployment', cluster, namespace, a.name);
             fs.mkdirSync(outputDir, { recursive: true });
 
             const payload = {
               cluster,
               namespace,
+              overlay_dir: overlayDir,  // ⬅️ New top-level field
               applications: [
                 {
                   name: a.name,
                   repo: `https://github.com/${process.env.CD_REPO_ORG}/${process.env.CD_REPO}`,
-                  overlay_dir: a.path
+                  path: a.path              // Leave path as-is (no overlays)
                 }
               ]
             };
 
             const outputFile = path.join(outputDir, 'create.json');
             fs.writeFileSync(outputFile, JSON.stringify(payload, null, 2));
-            core.info(`🧾 Wrote ${outputFile} for ${a.name} → ${a.path}`);
+            core.info(`🧾 Wrote ${outputFile} for ${a.name} (overlay_dir=${overlayDir || 'default'})`);
           }
 
           core.info(`✅ Finished writing create.json for ${apps.length} app(s)`);
+
+
 
     - name: Setup Kustomize
       if: ${{ inputs.delete_only == false }}
