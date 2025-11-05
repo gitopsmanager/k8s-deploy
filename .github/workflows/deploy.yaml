@@ -818,6 +818,7 @@ jobs:
         argocd_ca_cert: ${{ secrets.ARGOCD_CA_CERT }}
         namespace: ${{ inputs.namespace }}
         cd_repo: ${{ inputs.cd_repo }}
+        cd_path_rel: ${{ steps.copy.outputs.cd_path_rel }}
         cd_repo_org: ${{ inputs.cd_repo_org }}
         overlay_dir: ${{ inputs.overlay_dir }}
         apps: ${{ steps.apps.outputs.apps }}
