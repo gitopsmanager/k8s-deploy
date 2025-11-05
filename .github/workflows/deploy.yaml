@@ -781,7 +781,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: built-kustomize-manifest-${{ steps.env.outputs.cluster }}-${{ fromJSON(steps.apps.outputs.apps)[0].name }}
-        path: build-output-${{ fromJSON(steps.apps.outputs.apps)[0].name }}.yaml
+        path: build-output.yaml
 
 
     - name: Commit and squash-merge changes
@@ -803,8 +803,8 @@ jobs:
       uses: gitopsmanager/ArgoCD-Manage-Applications@main
       with:
         argocd_auth_token: ${{ inputs.argocd_auth_token }}
-        argocd_username: ${{ inputs.argocd_username }}
-        argocd_password: ${{ inputs.argocd_password }}
+        argocd_username: ${{ secrets.ARGOCD_USERNAME }}
+        argocd_password: ${{ secrets.ARGOCD_PASSWORD }}
         insecure_argo: ${{ inputs.insecure_argo }}
         argocd_ca_cert: ${{ secrets.ARGOCD_CA_CERT }}
         namespace: ${{ inputs.namespace }}
@@ -816,5 +816,6 @@ jobs:
         delete_only: ${{ inputs.delete_only }}
         skip_status_check: ${{ inputs.skip_status_check }}
         no_fail: false
+
 
 
