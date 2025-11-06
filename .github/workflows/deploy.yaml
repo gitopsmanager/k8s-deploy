@@ -156,7 +156,7 @@ jobs:
     runs-on: ${{ inputs.github_runner }}
     environment: ${{ inputs.github_environment }}
     outputs:
-      cd_path: ${{ steps.cdroot.outputs.cd_root }}
+      cd_path: ${{ steps.env.outputs.cd_root }}
     steps:
     - name: Checkout repo
       if: ${{ inputs.delete_only == false }}
@@ -263,165 +263,17 @@ jobs:
         printf "ENV_MAP<<EOF\n%s\nEOF\n" "$ENV_MAP" >> $GITHUB_ENV
 
 
-    # Strict env_map parsing + cluster selection (with ENV_MAP fallback)
-    - name: Load environment config (JSON)
+
+    - name: Load Environment Config
       id: env
-      uses: actions/github-script@v7
-      env:
-        INLINE_ENV_MAP: ${{ inputs.env_map }}   # workflow input (preferred)
-        ENV_MAP: ${{ env.ENV_MAP }}            # fallback env var (e.g., injected from ConfigMap on self-hosted)
-        ENVIRONMENT: ${{ inputs.target_environment }}
-        CLUSTER_IN: ${{ inputs.target_cluster }}
-        NAMESPACE: ${{ inputs.namespace }}
+      uses: gitopsmanager/load-env@v1
       with:
-        script: |
-          const sourceInput = (process.env.INLINE_ENV_MAP || '').trim();
-          const sourceEnv   = (process.env.ENV_MAP || '').trim();
-          const raw = sourceInput || sourceEnv;
-
-          if (!raw) {
-            core.setFailed('❌ No env_map provided. Pass inputs.env_map OR set ENV_MAP environment variable.');
-            return;
-          }
-          core.info(`Using env_map from ${sourceInput ? 'workflow input (inputs.env_map)' : 'ENV_MAP environment variable'}.`);
-
-          let map;
-          try { map = JSON.parse(raw); }
-          catch (err) { core.setFailed(`❌ env_map is not valid JSON: ${err.message}`); return; }
-
-          const envName   = (process.env.ENVIRONMENT || '').trim();
-          const clusterIn = (process.env.CLUSTER_IN || '').trim();
-
-          let selected;
-
-          if (clusterIn) {
-            // Cluster override: search ALL clusters across ALL environments
-            const allClusters = Object.entries(map)
-              .flatMap(([env, val]) => (val.clusters || []).map(c => ({ ...c, __env: env })));
-
-            selected = allClusters.find(c => String(c.cluster).toLowerCase() === clusterIn.toLowerCase());
-            if (!selected) {
-              const available = allClusters.map(c => `${c.cluster} (env=${c.__env})`);
-              core.setFailed(`❌ target_cluster '${clusterIn}' not found. Available: ${available.join(', ')}`);
-              return;
-            }
-
-            if (selected.__env !== envName) {
-              core.warning(`⚠️ target_cluster '${clusterIn}' belongs to env '${selected.__env}', not requested env '${envName}'. Proceeding anyway.`);
-            }
-
-            core.info(`Cluster override: using cluster '${selected.cluster}' from env '${selected.__env}'`);
-          } else {
-            // Normal environment-based selection
-            if (!Object.prototype.hasOwnProperty.call(map, envName)) {
-              core.setFailed(`❌ Environment '${envName}' not found. Available: ${Object.keys(map).join(', ')}`);
-              return;
-            }
-
-            const entry = map[envName];
-            if (!entry || typeof entry !== 'object' || !Array.isArray(entry.clusters)) {
-              core.setFailed(`❌ env_map['${envName}'] must be { cluster_count, clusters: [...] }`);
-              return;
-            }
-            if (entry.clusters.length === 0) {
-              core.setFailed(`❌ env_map['${envName}'].clusters is empty`);
-              return;
-            }
-            if (entry.clusters.length > 1) {
-              const names = entry.clusters.map(c => c.cluster).filter(Boolean);
-              core.setFailed(`❌ '${envName}' has multiple clusters. Provide target_cluster. Options: ${names.join(', ')}`);
-              return;
-            }
-
-            selected = entry.clusters[0];
-            core.info(`Selected single cluster '${selected.cluster}' from env '${envName}'`);
-          }
-
-          // Final validation + outputs
-          const cluster   = String(selected.cluster || '');
-          const dnsZone   = String(selected.dns_zone || '');
-          const registry  = String(selected.container_registry || '');
-          const uami      = Array.isArray(selected.uami_map) ? selected.uami_map : [];
-
-          if (!cluster) { core.setFailed('❌ Selected cluster name is empty'); return; }
-          if (!dnsZone) { core.setFailed(`❌ Cluster '${cluster}' is missing dns_zone`); return; }
-
-          core.setOutput('cluster', cluster);
-          core.setOutput('dns_zone', dnsZone);
-          core.setOutput('container_registry', registry);
-          core.setOutput('uami_map', JSON.stringify(uami));
-          core.setOutput('namespace', process.env.NAMESPACE);
+        env_map: ${{ inputs.env_map }} 
+        target_environment: ${{ inputs.target_environment }}
+        target_cluster: ${{ inputs.target_cluster }}
+        namespace:  ${{ inputs.namespace }}
 
 
-
-
-    - name: Export CD_ROOT
-      id: cdroot
-      run: |
-        CD_ROOT="continuous-deployment/${{ steps.env.outputs.cluster }}/${{ inputs.namespace }}"
-        echo "CD_ROOT=$CD_ROOT" >> "$GITHUB_ENV"
-        echo "cd_root=$CD_ROOT" >> "$GITHUB_OUTPUT"
-
-    - name: Export UAMI env vars (uami_name => client_id)
-      id: uami
-      if: ${{ inputs.delete_only == false }}
-      uses: actions/github-script@v7
-      env:
-        UAMI_JSON: ${{ steps.env.outputs.uami_map }}
-        CLUSTER: ${{ steps.env.outputs.cluster }}
-      with:
-        script: |
-          const clusterName = (process.env.CLUSTER || '').trim();
-
-          let arr = [];
-          try { arr = JSON.parse(process.env.UAMI_JSON || '[]'); }
-          catch { core.setFailed('❌ Selected cluster uami_map is not valid JSON'); return; }
-
-          if (!Array.isArray(arr) || arr.length === 0) {
-            core.info('No UAMI entries for selected cluster.');
-            core.setOutput("uami_vars", "{}");
-            return;
-          }
-
-          const seen = new Set();
-          const exported = {};
-
-          for (const [i, u] of arr.entries()) {
-            let name = String(u.uami_name || '').trim();
-            const rg   = String(u.uami_resource_group || '').trim();
-            const cid  = String(u.client_id || '').trim();
-
-            if (!name || !cid) {
-              core.warning(`Skipping UAMI index ${i}: missing uami_name or client_id.`);
-              continue;
-            }
-
-            // Remove "<clusterName>-" prefix if present
-            const prefix = clusterName + "-";
-            if (name.toLowerCase().startsWith(prefix.toLowerCase())) {
-              name = name.substring(prefix.length);
-            }
-
-            // Replace '-' with '_'
-            let varName = name.replace(/-/g, "_");
-
-            // Ensure valid shell identifier
-            if (!/^[A-Za-z_]/.test(varName)) varName = `_${varName}`;
-
-            if (seen.has(varName)) {
-              core.warning(`Duplicate UAMI var '${varName}' (rg='${rg}'). Skipping duplicate.`);
-              continue;
-            }
-
-            exported[varName.toLowerCase()] = cid;
-            seen.add(varName);
-          }
-
-          core.info("UAMI vars exported:");
-          core.info(JSON.stringify(exported, null, 2));
-
-          // Set JSON object as step output
-          core.setOutput("uami_vars", JSON.stringify(exported));
 
 
 
@@ -499,7 +351,7 @@ jobs:
         NAMESPACE: ${{ inputs.namespace }}
         APPLICATION_DEFAULT: ${{ inputs.application }}
         CONTAINER_REGISTRY: ${{ steps.env.outputs.container_registry }}
-        UAMI_VARS: ${{ steps.uami.outputs.uami_vars }}
+        UAMI_VARS: ${{ steps.env.outputs.uami_vars }}
       with:
         script: |
           const fs = require('fs');
