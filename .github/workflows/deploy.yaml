@@ -233,7 +233,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: gitopsmanager/k8s-deploy
-        ref: v2
+        ref: v2.1
         path: reusable
 
     - name: Checkout continuous-deployment repo
