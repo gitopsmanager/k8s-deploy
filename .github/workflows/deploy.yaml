@@ -488,13 +488,6 @@ jobs:
           core.setOutput('count', String(apps.length));
 
 
-
-    - name: Download Nunjucks UMD bundle
-      if: ${{ inputs.delete_only == false }}
-      run: |
-        curl -sSL https://cdnjs.cloudflare.com/ajax/libs/nunjucks/3.2.4/nunjucks.min.js -o nunjucks.js
-
-
     - name: Render manifests with Nunjucks (Jinja2-style)
       id: render
       if: ${{ inputs.delete_only == false }}
