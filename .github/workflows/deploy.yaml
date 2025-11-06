@@ -267,6 +267,8 @@ jobs:
     - name: Load Environment Config
       id: env
       uses: gitopsmanager/k8s-load-env@v1
+      env:
+        ENV_MAP: ${{ env.ENV_MAP }} 
       with:
         env_map: ${{ inputs.env_map }} 
         target_environment: ${{ inputs.target_environment }}
