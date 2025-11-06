@@ -504,7 +504,7 @@ jobs:
         script: |
           const fs = require('fs');
           const path = require('path');
-          const nunjucks = require(path.resolve('./reusable/nunjucks.js'));
+          const nunjucks = require(path.join(process.env.GITHUB_WORKSPACE, 'reusable', 'nunjucks.js'));
 
           const apps = JSON.parse(process.env.APPS || '[]');
           core.info(`📝 Apps to render: ${apps.map(a => a.name).join(', ')}`);
