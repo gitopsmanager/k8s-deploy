@@ -481,8 +481,6 @@ jobs:
       id: create-json
       uses: actions/github-script@v7
       env:
-        CLUSTER: ${{ steps.env.outputs.cluster }}
-        NAMESPACE: ${{ steps.env.outputs.namespace || inputs.namespace }}
         APPS: ${{ steps.apps.outputs.apps }}
         CD_REPO: ${{ inputs.cd_repo }}
         CD_REPO_ORG: ${{ inputs.cd_repo_org }}
@@ -493,8 +491,8 @@ jobs:
           const path = require('path');
 
           const workspace = process.env.GITHUB_WORKSPACE;
-          const cluster = process.env.CLUSTER;
-          const namespace = process.env.NAMESPACE || 'default';
+          const cluster = "${{ steps.env.outputs.cluster }}";
+          const namespace = "${{ steps.env.outputs.namespace || inputs.namespace }}";
           const overlayDir = (process.env.OVERLAY_DIR || '').trim();
           const apps = JSON.parse(process.env.APPS || '[]');
 
