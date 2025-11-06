@@ -275,6 +275,11 @@ jobs:
         target_cluster: ${{ inputs.target_cluster }}
         namespace:  ${{ inputs.namespace }}
 
+    - name: Debug env outputs
+      run: |
+        echo "cluster='${{ steps.env.outputs.cluster }}'"
+        echo "dns_zone='${{ steps.env.outputs.dns_zone }}'"
+        echo "cd_root='${{ steps.env.outputs.cd_root }}'"
 
 
 
