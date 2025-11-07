@@ -358,7 +358,7 @@ jobs:
         NAMESPACE: ${{ inputs.namespace }}
         APPLICATION_DEFAULT: ${{ inputs.application }}
         CONTAINER_REGISTRY: ${{ steps.env.outputs.container_registry }}
-        UAMI_VARS: ${{ steps.env.outputs.uami_vars }}
+        UAMI_VARS: "'${{ steps.env.outputs.uami_vars }}'"
       with:
         script: |
           const fs = require('fs');
