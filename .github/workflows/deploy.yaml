@@ -358,7 +358,7 @@ jobs:
         NAMESPACE: ${{ inputs.namespace }}
         APPLICATION_DEFAULT: ${{ inputs.application }}
         CONTAINER_REGISTRY: ${{ steps.env.outputs.container_registry }}
-        UAMI_VARS: ${{ steps.env.outputs.uami_vars }}
+        UAMI_VARS_B64: ${{ steps.env.outputs.uami_vars_b64 }}
       with:
         script: |
           const fs = require('fs');
@@ -379,29 +379,15 @@ jobs:
           };
           core.info(`🌍 Base vars: ${JSON.stringify(vars)}`);
 
-          // Merge in UAMI vars (client IDs keyed by uami_name)
           try {
-            core.info(`🐛 Raw UAMI_VARS env: ${process.env.UAMI_VARS}`);
-
-            const parsed = JSON.parse(process.env.UAMI_VARS || '{}');
-            core.info(`🐛 Parsed UAMI_VARS type: ${typeof parsed}`);
-            core.info(`🐛 Parsed UAMI_VARS value: ${JSON.stringify(parsed, null, 2)}`);
-
-            Object.assign(vars, parsed);
-            core.info(`🔑 Injected UAMI vars: ${Object.keys(parsed).join(', ')}`);
-          } catch (err) {
-            core.warning(`⚠️ Could not parse UAMI_VARS: ${err.message}`);
-          }
-
-
-          // Merge in UAMI vars (client IDs keyed by uami_name)
-          try {
-            const uamiVars = JSON.parse(process.env.UAMI_VARS || '{}');
+            const decoded = Buffer.from(process.env.UAMI_VARS_B64 || '', 'base64').toString();
+            const uamiVars = JSON.parse(decoded || '{}');
             Object.assign(vars, uamiVars);
             core.info(`🔑 Injected UAMI vars: ${Object.keys(uamiVars).join(', ')}`);
           } catch (err) {
-            core.warning(`⚠️ Could not parse UAMI_VARS: ${err.message}`);
+            core.warning(`⚠️ Could not parse UAMI_VARS_B64: ${err.message}`);
           }
+
 
           nunjucks.configure({ autoescape: false });
 
