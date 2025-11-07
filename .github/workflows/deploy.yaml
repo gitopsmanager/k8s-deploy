@@ -381,6 +381,7 @@ jobs:
 
           try {
             const decoded = Buffer.from(process.env.UAMI_VARS_B64 || '', 'base64').toString();
+            core.info(`🔑 UAMI decoded: ${decoded}`);
             const uamiVars = JSON.parse(decoded || '{}');
             Object.assign(vars, uamiVars);
             core.info(`🔑 Injected UAMI vars: ${Object.keys(uamiVars).join(', ')}`);
