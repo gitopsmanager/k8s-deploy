@@ -424,6 +424,20 @@ All tags will now **increment forward permanently** — no re-use or re-tagging 
 
 ---
 
+## 🧩 Dependencies
+
+This action includes a bundled copy of **nunjucks.js** for JSON template rendering.
+
+- **Library:** [nunjucks](https://github.com/mozilla/nunjucks)
+- **Version:** 3.2.4
+- **License:** BSD-2-Clause
+- **Copyright:** © Mozilla Foundation
+
+Used under the terms of the BSD-2-Clause license.  
+See the [nunjucks LICENSE file](https://github.com/mozilla/nunjucks/blob/main/LICENSE) for full details.
+
+---
+
 ## 📜 License
 MIT License  
 Copyright (c) 2025 Affinity7 Consulting Ltd

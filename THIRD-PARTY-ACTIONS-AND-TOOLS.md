@@ -32,14 +32,6 @@ These tools are installed or invoked directly in the workflow:
   License: curl license (similar to MIT)  
   Source: https://curl.se/
 
-- **gettext/envsubst**  
-  License: GPL-3.0-or-later  
-  Source: https://www.gnu.org/software/gettext/
-
-- **yq (mikefarah/yq)**  
-  License: MIT  
-  Source: https://github.com/mikefarah/yq
-
 - **jq**  
   License: MIT  
   Source: https://github.com/stedolan/jq
