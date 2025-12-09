@@ -660,7 +660,7 @@ jobs:
         echo "url=https://${{ steps.env.outputs.cluster }}-argocd-argocd-web-ui.${{ steps.env.outputs.dns_zone }}" >> $GITHUB_OUTPUT
 
     - name: Manage ArgoCD Applications
-      uses: gitopsmanager/ArgoCD-Manage-Applications@v1
+      uses: gitopsmanager/ArgoCD-Manage-Applications@no-autosync
       with:
         argocd_url: ${{ steps.build_argo_url.outputs.url }}
         argocd_auth_token: ${{ inputs.argocd_auth_token }}
