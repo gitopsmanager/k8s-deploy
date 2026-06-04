@@ -268,7 +268,7 @@ jobs:
 
     - name: Load Environment Config
       id: env
-      uses: gitopsmanager/k8s-load-env@v1
+      uses: gitopsmanager/k8s-load-env@test-node24-upgrade
       env:
         ENV_MAP: ${{ env.ENV_MAP }} 
       with:
@@ -643,7 +643,7 @@ jobs:
 
 
     - name: Commit and squash-merge changes
-      uses: gitopsmanager/Auto-Commit-Squash-Merge@v1
+      uses: gitopsmanager/Auto-Commit-Squash-Merge@test-node24-upgrade
       with:
         token: ${{ steps.generate_token.outputs.token }}
         repo_owner: ${{ inputs.cd_repo_org }}
@@ -662,7 +662,7 @@ jobs:
         echo "url=https://${{ steps.env.outputs.cluster }}-argocd-argocd-web-ui.${{ steps.env.outputs.dns_zone }}" >> $GITHUB_OUTPUT
 
     - name: Manage ArgoCD Applications
-      uses: gitopsmanager/ArgoCD-Manage-Applications@v1
+      uses: gitopsmanager/ArgoCD-Manage-Applications@test-node24-upgrade
       with:
         argocd_url: ${{ steps.build_argo_url.outputs.url }}
         argocd_auth_token: ${{ inputs.argocd_auth_token }}
