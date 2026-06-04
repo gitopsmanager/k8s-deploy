@@ -1,5 +1,5 @@
 # deploy.yaml
-# Copyright (c) 2025 Affinity7 Consulting Ltd
+# Copyright (c) 2025 GitOps Manager, S.L.
 # Version: v2 (reusable, minimal auth precedence)
 # SPDX-License-Identifier: MIT
 
@@ -155,12 +155,14 @@ jobs:
       ${{ inputs.target_environment }}${{ inputs.target_cluster != '' && format(' - {0}', inputs.target_cluster) || '' }}
     runs-on: ${{ inputs.github_runner }}
     environment: ${{ inputs.github_environment }}
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     outputs:
       cd_path: ${{ steps.env.outputs.cd_root }}
     steps:
     - name: Checkout repo
       if: ${{ inputs.delete_only == false }}
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 1
         repository: ${{ github.repository }}
@@ -169,7 +171,7 @@ jobs:
 
 
     - name: Report usage metrics (non-blocking)
-      uses: actions/github-script@v7
+      uses: actions/github-script@v9
       continue-on-error: true
       timeout-minutes: 0.5
       env:
@@ -219,7 +221,7 @@ jobs:
 
     - name: Generate GitHub App token
       id: generate_token
-      uses: actions/create-github-app-token@v2
+      uses: actions/create-github-app-token@v3
       with:
         app-id: ${{ secrets.CONTINUOUS_DEPLOYMENT_GH_APP_ID }}
         private-key: ${{ secrets.CONTINUOUS_DEPLOYMENT_GH_APP_PRIVATE_KEY }}
@@ -230,14 +232,14 @@ jobs:
 
     - name: Checkout reusable workflow repo
       if: ${{ inputs.delete_only == false }}
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         repository: gitopsmanager/k8s-deploy
         ref: v2.1
         path: reusable
 
     - name: Checkout continuous-deployment repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         repository: ${{ inputs.cd_repo_org }}/${{ inputs.cd_repo }}
         token: ${{ steps.generate_token.outputs.token }}
@@ -288,7 +290,7 @@ jobs:
     # Unify to a single apps[] list for either mode
     - name: Resolve apps (single or multi)
       id: apps
-      uses: actions/github-script@v7
+      uses: actions/github-script@v9
       env:
         APP_DETAILS: ${{ inputs.application_details }}
         APPLICATION: ${{ inputs.application }}
@@ -350,7 +352,7 @@ jobs:
     - name: Render manifests with Nunjucks (Jinja2-style)
       id: render
       if: ${{ inputs.delete_only == false }}
-      uses: actions/github-script@v7
+      uses: actions/github-script@v9
       env:
         APPS: ${{ steps.apps.outputs.apps }}
         CLUSTER_NAME: ${{ steps.env.outputs.cluster }}
@@ -441,7 +443,7 @@ jobs:
     - name: Copy manifests to CD repo
       id: copy
       if: ${{ inputs.delete_only == false }}
-      uses: actions/github-script@v7
+      uses: actions/github-script@v9
       env:
         CLUSTER_NAME: ${{ steps.env.outputs.cluster }}
         NAMESPACE: ${{ inputs.namespace }}
@@ -486,7 +488,7 @@ jobs:
 
     - name: Create JSON for cluster restore
       id: create-json
-      uses: actions/github-script@v7
+      uses: actions/github-script@v9
       env:
         APPS: ${{ steps.apps.outputs.apps }}
         CD_REPO: ${{ inputs.cd_repo }}
@@ -542,13 +544,13 @@ jobs:
 
     - name: Setup Kustomize
       if: ${{ inputs.delete_only == false }}
-      uses: imranismail/setup-kustomize@v2
+      uses: imranismail/setup-kustomize@v3
       with:
         kustomize-version: ${{ inputs.kustomize_version }}
 
     - name: Patch image tag(s) (per app)
       if: ${{ inputs.image_tag != '' && inputs.delete_only == false  }}
-      uses: actions/github-script@v7
+      uses: actions/github-script@v9
       env:
         APPS: ${{ steps.apps.outputs.apps }}
         CD_PATH: ${{ steps.copy.outputs.cd_path }}
@@ -590,7 +592,7 @@ jobs:
 
     - name: Upload CD repo manifests
       if: ${{ always() && inputs.delete_only == false }}
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: templated-source-manifests-${{ steps.env.outputs.cluster }}-${{ fromJSON(steps.apps.outputs.apps)[0].name }}
         path: ${{ steps.copy.outputs.cd_path }}/${{ fromJSON(steps.apps.outputs.apps)[0].name }}
@@ -603,7 +605,7 @@ jobs:
     - name: Run kustomize build (concat per app)
       id: kustomize
       if: ${{ inputs.delete_only == false }}
-      uses: actions/github-script@v7
+      uses: actions/github-script@v9
       env:
         APPS: ${{ steps.apps.outputs.apps }}
         CD_PATH: ${{ steps.copy.outputs.cd_path }}
@@ -634,7 +636,7 @@ jobs:
 
     - name: Upload built manifest as artifact
       if: ${{ always() && inputs.delete_only == false }}
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: built-kustomize-manifest-${{ steps.env.outputs.cluster }}-${{ fromJSON(steps.apps.outputs.apps)[0].name }}
         path: build-output.yaml
