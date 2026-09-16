@@ -286,7 +286,7 @@ jobs:
 
     - name: Load Environment Config
       id: env
-      uses: gitopsmanager/k8s-load-env@v1
+      uses: gitopsmanager/k8s-load-env@v1.1.0          # TEMP: exact pin for testing, back to @v1 before release
       env:
         ENV_MAP: ${{ env.ENV_MAP }} 
       with:
@@ -682,7 +682,7 @@ jobs:
         echo "url=https://${{ steps.env.outputs.cluster }}-argocd-argocd-web-ui.${{ steps.env.outputs.dns_zone }}" >> $GITHUB_OUTPUT
 
     - name: Manage ArgoCD Applications
-      uses: gitopsmanager/ArgoCD-Manage-Applications@v1
+      uses: gitopsmanager/ArgoCD-Manage-Applications@v1.1.0   # TEMP: exact pin for testing, back to @v1 before release
       with:
         argocd_url: ${{ steps.build_argo_url.outputs.url }}
         argocd_auth_token: ${{ inputs.argocd_auth_token }}
