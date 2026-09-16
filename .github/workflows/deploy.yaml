@@ -36,6 +36,24 @@ on:
         required: false
         default: ""
         type: string
+
+      # Only consulted when the environment holds clusters in more than one cloud
+      target_cloud:
+        description: >
+          Which cloud to deploy to (`aws` or `azure`) when the selected
+          target_environment holds clusters in more than one cloud. It chooses
+          between them; it does not deploy to more than one. To deploy to
+          several, call this workflow once per cloud from a matrix.
+
+          - Leave empty and the runner's own cloud decides, which is right
+            whenever the runner sits in the cluster it deploys to.
+          - Set it to deploy across a VPN to the other cloud, or when the
+            runner is GitHub-hosted and has no cloud of its own.
+          - Ignored when `target_cluster` is given, since that already names
+            one cluster.
+        required: false
+        default: ""
+        type: string
       ref:
         description: "The github ref to use for checking out files"
         required: false
@@ -275,11 +293,13 @@ jobs:
         env_map: ${{ inputs.env_map }} 
         target_environment: ${{ inputs.target_environment }}
         target_cluster: ${{ inputs.target_cluster }}
+        target_cloud: ${{ inputs.target_cloud }}
         namespace:  ${{ inputs.namespace }}
 
     - name: Debug env outputs
       run: |
         echo "cluster='${{ steps.env.outputs.cluster }}'"
+        echo "cloud='${{ steps.env.outputs.cloud }}'"
         echo "dns_zone='${{ steps.env.outputs.dns_zone }}'"
         echo "cd_root='${{ steps.env.outputs.cd_root }}'"
 

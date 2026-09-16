@@ -84,6 +84,7 @@ For privacy or data-related inquiries, please use the **Contact** button on [git
 | `namespace`          | ✅       | string   | –       | Kubernetes namespace for deployment |
 | `target_environment` | ✅       | string   | `dev`   | Logical environment (`dev`, `qa`, `prod`). Still required even if `target_cluster` is set, as it controls approvals and environment scoping. |
 | `target_cluster`     | ❌       | string   | `""`    | If set, resolves the cluster **globally across all `env_map` environments** by matching the `cluster` name. If omitted, the cluster is resolved from the given `target_environment` only. |
+| `target_cloud`       | ❌       | string   | `""`    | Cloud (`aws` or `azure`) to deploy to when the environment holds clusters in more than one cloud. Selects one of them; it does not deploy to several. Ignored if `target_cluster` is set. Left empty, the runner's own cloud breaks the tie. |
 | `ref`                | ❌       | string   | `${{ github.ref || github.sha }}` | Git reference (branch, tag, or commit SHA) for source repo checkout |
 | `delete_first`       | ❌       | boolean  | `false` | Delete ArgoCD app(s) before deploying (**then redeploy**). |
 | `delete_only`        | ❌       | boolean  | `false` | If `true`, the workflow will **only delete ArgoCD apps** for the specified cluster/namespace and clean up their corresponding directories in the CD repo. |
@@ -137,8 +138,16 @@ If neither is provided, the workflow fails.
 
 2. If `target_cluster` is not set:  
    - Looks inside the `target_environment` only.  
-   - If single cluster → use it.  
-   - If multiple clusters → fail with error listing options.  
+   - If single cluster → use it. The cloud is **not** checked, so a runner
+     deploying across a VPN to the other cloud works as it always did.  
+   - If multiple clusters → narrow by `target_cloud` when given, otherwise by
+     the runner's own cloud (a tie-break only, logged as a warning).  
+   - If a choice still remains → fail with an error listing the options and
+     their clouds.  
+
+Clusters declare their cloud in the `env_map` as `"cloud": "aws" | "azure"`.
+The field is optional: a map without it behaves exactly as before, and is never
+filtered out by `target_cloud`.
 
 ---
 
@@ -149,14 +158,14 @@ If neither is provided, the workflow fails.
   "dev": {
     "cluster_count": 1,
     "clusters": [
-      { "cluster": "aks-dev-weu", "dns_zone": "internal.dev.example.com", "container_registry": "ghcr.io/my-org", "uami_map": [] }
+      { "cluster": "aks-dev-weu", "cloud": "azure", "dns_zone": "internal.dev.example.com", "container_registry": "ghcr.io/my-org", "uami_map": [] }
     ]
   },
   "prod": {
     "cluster_count": 2,
     "clusters": [
-      { "cluster": "aks-prod-weu", "dns_zone": "internal.example.com", "container_registry": "ghcr.io/my-org", "uami_map": [] },
-      { "cluster": "aks-prod-use", "dns_zone": "internal.example.com", "container_registry": "ghcr.io/my-org", "uami_map": [] }
+      { "cluster": "aks-prod-weu", "cloud": "azure", "dns_zone": "internal.example.com", "container_registry": "ghcr.io/my-org", "uami_map": [] },
+      { "cluster": "aks-prod-use", "cloud": "azure", "dns_zone": "internal.example.com", "container_registry": "ghcr.io/my-org", "uami_map": [] }
     ]
   }
 }
