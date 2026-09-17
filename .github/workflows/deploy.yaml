@@ -171,7 +171,23 @@ jobs:
   deploy:
     name: >-
       ${{ inputs.target_environment }}${{ inputs.target_cluster != '' && format(' - {0}', inputs.target_cluster) || '' }}
-    runs-on: ${{ inputs.github_runner }}
+    # Accepts EITHER a bare runner name or a JSON array of labels:
+    #
+    #   github_runner: arc-runner-set
+    #   github_runner: '["self-hosted","ubuntu","aws","build"]'
+    #
+    # runs-on takes a string or an array, but an EXPRESSION can only
+    # produce an array through fromJSON -- and fromJSON on a bare name
+    # is a parse error, an unquoted token not being valid JSON. So the
+    # startsWith test picks the branch: JSON passes through untouched,
+    # anything else is wrapped into a one-element array. Verified that a
+    # one-element array matches an ARC scale set exactly as the bare
+    # name does, so every existing caller is unaffected.
+    #
+    # A comma-separated string does NOT work: it does not start with
+    # '[', so it is wrapped whole into a single label containing commas.
+    # GitHub expressions have no split or replace with which to fix it.
+    runs-on: ${{ fromJSON(startsWith(inputs.github_runner, '[') && inputs.github_runner || format('["{0}"]', inputs.github_runner)) }}
     environment: ${{ inputs.github_environment }}
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
