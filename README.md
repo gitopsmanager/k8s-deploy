@@ -6,7 +6,7 @@ This reusable workflow automates Kubernetes application deployment using [Kustom
 It renders manifest files using **Jinja2-style templating implemented with [Nunjucks](https://mozilla.github.io/nunjucks/)**, commits the results into your **continuous deployment (CD) repo**, and uses the **ArgoCD REST API** to create, sync, and validate applications.
 It also uploads artifacts for the **Kustomize build** and the **templated files** to be checked into the CD repo, which can be used for **troubleshooting any issues with Kustomize**.
 
-🧩 **Open Source:** Maintained by **Affinity7 Consulting Ltd**, this workflow is part of the [**GitOps Manager™**](https://gitopsmanager.io) open-source toolchain — powering both community and enterprise GitOps automation across AWS and Azure.
+🧩 **Open Source:** Maintained by **GitOps Manager, S.L.**, this workflow is part of the [**GitOps Manager™**](https://gitopsmanager.io) open-source toolchain — powering both community and enterprise GitOps automation across AWS and Azure.
 
 > ✅ **First-time deployments are supported** – ArgoCD apps are auto-created if missing.  
 > 🗑️ **Optional `delete_first`** – force ArgoCD app deletion before re-create (**then performs a full redeploy**).  
@@ -449,7 +449,7 @@ See the [nunjucks LICENSE file](https://github.com/mozilla/nunjucks/blob/main/LI
 
 ## 📜 License
 MIT License  
-Copyright (c) 2025 Affinity7 Consulting Ltd
+Copyright (c) 2025 GitOps Manager, S.L.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
