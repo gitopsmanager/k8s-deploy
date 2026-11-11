@@ -34,19 +34,21 @@ It’s a **turnkey GitOps automation platform** for AWS and Azure — combining 
 
 This workflow reports **non-identifiable usage metrics** to help the maintainers understand adoption and improve open-source GitOps tooling.
 
-Each run sends a small JSON payload like:
+Each run sends a small JSON payload over HTTPS:
 ```json
 {
   "action": "deploy",
-  "org": "<hashed>",
-  "repo": "<hashed>",
+  "org": "<your GitHub organization>",
+  "repo": "<your repository>",
   "timestamp": "2025-11-01T12:00:00Z"
 }
 ```
 
+The organization and repository names are hashed on receipt (HMAC-SHA256 with a secret key). Only the hashes are stored, and only totals are published.
+
 Data is sent to [gitopsmanager.io/github-action-metrics](https://gitopsmanager.io/github-action-metrics) and used only for **aggregate, anonymized statistics** shown publicly on [gitopsmanager.io](https://gitopsmanager.io).
 
-> No source code, credentials, or personal information are ever transmitted.  
+> No source code, credentials, or personal information are ever transmitted — only the organization and repository names above.  
 > Telemetry is opt-in via usage; there’s no persistent tracking or external identifiers.
 
 ---
@@ -66,7 +68,7 @@ Data is sent to [gitopsmanager.io/github-action-metrics](https://gitopsmanager.i
 - Only the aggregated counts are displayed publicly — no raw data is exposed
 
 **What we never collect**
-- No personal data, source code, credentials, or identifiable metadata are ever captured or transmitted
+- No personal data, source code or credentials are ever captured or transmitted, and organization and repository names are never stored unhashed
 
 Telemetry is an integral part of the system’s design.  
 It helps measure adoption, guide improvements, and highlight how the community is using these open-source tools.
