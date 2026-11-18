@@ -393,6 +393,7 @@ jobs:
         APPS: ${{ steps.apps.outputs.apps }}
         CLUSTER_NAME: ${{ steps.env.outputs.cluster }}
         DNS_ZONE: ${{ steps.env.outputs.dns_zone }}
+        CLOUD: ${{ steps.env.outputs.cloud }}
         NAMESPACE: ${{ inputs.namespace }}
         APPLICATION_DEFAULT: ${{ inputs.application }}
         CONTAINER_REGISTRY: ${{ steps.env.outputs.container_registry }}
@@ -413,6 +414,7 @@ jobs:
             cluster_name: process.env.CLUSTER_NAME,
             dns_zone: process.env.DNS_ZONE,
             zone_nm: process.env.DNS_ZONE,
+            cloud: process.env.CLOUD,
             namespace: process.env.NAMESPACE,
           };
           core.info(`🌍 Base vars: ${JSON.stringify(vars)}`);
