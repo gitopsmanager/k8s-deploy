@@ -175,6 +175,26 @@ filtered out by `target_cloud`.
 
 ---
 
+## 🧩 Template Variables
+
+Every `.yaml`, `.yml` and `.json` file in the deploy path is rendered with Nunjucks (Jinja2-style) before Kustomize runs, except files ending in `notemplate.yaml`. These variables are filled in for the cluster the deploy resolved, so one manifest works on every cluster without a Helm chart:
+
+| Variable | Value | Example |
+|----------|-------|---------|
+| `{{ cluster_name }}` | The cluster picked from `env_map` | `aks-prod-weu` |
+| `{{ cloud }}` | That cluster's `cloud` in `env_map` (empty if the entry has none) | `azure` |
+| `{{ dns_zone }}` | That cluster's `dns_zone` (also as `{{ zone_nm }}`) | `internal.example.com` |
+| `{{ namespace }}` | The `namespace` input | `myapp` |
+| `{{ <uami> }}` | Workload identity client IDs, see [UAMI Mapping](#-uami-mapping-for-azure-workload-identity) | `{{ app_uami }}` |
+
+```yaml
+spec:
+  rules:
+    - host: myapp.{{ dns_zone }}
+```
+
+---
+
 ## 🔑 UAMI Mapping for Azure Workload Identity
 
 When deploying to **Azure AKS**, some clusters may define **User Assigned Managed Identities (UAMIs)** in the `env_map`.  
